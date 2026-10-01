@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Run the project's Python (.venv-sim) isolated from any sourced ROS 2 / system Python paths.
+#   scripts/py scripts/sim_check.py --mode board
+#   scripts/py -m pytest
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+unset PYTHONPATH AMENT_PREFIX_PATH COLCON_PREFIX_PATH ROS_DISTRO ROS_VERSION ROS_PYTHON_VERSION
+export OMNI_KIT_ACCEPT_EULA=YES
+export PYTHONPATH="$ROOT"
+cd "$ROOT" && exec "$ROOT/.venv-sim/bin/python" "$@"

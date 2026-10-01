@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# learn2carve
+.venv-sim/
+third_party/
+logs/
+outputs/
+data/videos/
+envs/assets/src/
