@@ -231,7 +231,7 @@ class CarveEnv(DirectRLEnv):
         board_quat = torch.zeros(n, 4, device=self.device)
         board_quat[:, 2], board_quat[:, 3] = torch.sin(yaw / 2), torch.cos(yaw / 2)
         board_pos = self.scene.env_origins[env_ids].clone()
-        board_pos[:, 2] = self.board_half_thickness + 0.005
+        board_pos[:, 2] = self.board_half_thickness + 0.0005  # just clear of the snow: lands within a step
 
         # pelvis = board ∘ stance offset
         pelvis_pos = board_pos + quat_apply(board_quat, self.pelvis_in_board_pos.expand(n, 3))
