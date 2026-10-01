@@ -4,9 +4,10 @@
     scripts/py scripts/sim_check.py --num_envs 1 --edge 0 --seconds 10
     scripts/py scripts/sim_check.py --slope 5 --start_speed 2      # gentle slope
 
-Each env holds the snowboard stance (zero action) and, after --hold seconds, adds a fixed ankle-pitch action that
-tips the board: + presses the toes (toe edge), - lifts them (heel edge). Reports per env: survival, speed, edge
-angle, turn radius and grip usage, so the snow model can be checked with a real rider on top.
+Each env holds the snowboard stance (zero action) and, after --hold seconds, adds a fixed ankle-pitch action
+(+ leans the rider heelward, - toeward). Reports per env: survival, speed, edge angle, turn radius and grip usage.
+A PD-only rider can't hold an edge (that takes balance: Stage 3's policy), so expect falls within a few seconds;
+the carve geometry itself is checked by tests/test_snow.py.
 """
 
 import argparse
