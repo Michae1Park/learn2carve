@@ -2,10 +2,13 @@
 
 PhysX sees a frictionless ground; this module supplies everything snow does to the board:
 
-1. Glide     friction along the board + air drag
+1. Glide     friction along the board (air drag is separate: ``air_drag``, applied to the rider's body)
 2. Sidecut   on edge, the board's yaw rate is pulled toward v / (R · cos θ): it follows its sidecut arc,
-             unless that arc needs more grip than the edge has. Then the turn opens up (radius v² / a_max)
-3. Grip      lateral force cancelling sideslip, limited to μ_lat(θ) · N: carve while it holds, skid past it
+             unless that arc needs more grip than the edge has. Then the turn opens up (radius v² / a_max).
+             Flat, the target is 0: the edge's grip resists pivoting, up to the torque μ_lat · N · L / 4 that
+             friction spread along the edge can give (easy to pivot flat, hard on edge, never free-spinning)
+3. Grip      stick-slip ("bristle") friction across the board: a lateral spring + damper anchored where the edge
+             bites, limited to μ_lat(θ) · N. Carve (no slip) while it holds, skid past it
 
 Pure torch, batched over environments, all inputs and outputs in the world frame. Quaternions are (x, y, z, w),
 matching Isaac Lab 3.0. The snow surface normal is passed explicitly, so the model doesn't care whether the
@@ -32,16 +35,25 @@ class SnowParams:
     min_edge_deg: float = 3.0     # below this there is no sidecut steering
     sidecut_radius: float = 7.6   # m, effective single radius
     k_yaw: float = 50.0           # N·m·s, gain pulling yaw rate toward the sidecut rate
+    edge_length: float = 1.14     # m, effective edge in contact with the snow (caps the yaw torque)
     cd_area: float = 0.5          # m², C_d · A of rider + board
     air_density: float = 1.0      # kg/m³ (ski-resort altitude)
-    grip_alpha: float = 0.5       # fraction of sideslip momentum cancelled per step (< 1 avoids jitter)
+    grip_stiffness: float = 2.0e4 # N/m, lateral spring of the biting edge (holds a carve with zero steady slip)
+    grip_damping: float = 800.0   # N·s/m, damps it. Grip acts on the board alone, so both must stay stable for the
+                                  # light board end (~7 kg incl. feet) at 120 Hz. Sizing grip to cancel the whole
+                                  # rider's sideslip per step (≈ m/dt) shakes the board and topples the rider.
     system_mass: float = 67.7     # kg, rider + board: the mass whose sideslip the grip force must stop
     min_normal: float = 1.0       # N, below this the board counts as airborne
 
     @classmethod
-    def from_config(cls, snow: dict, rider_mass: float, board_mass: float, sidecut_radius: float) -> SnowParams:
+    def from_config(cls, snow: dict, board: dict, rider_mass: float) -> SnowParams:
         known = {k: v for k, v in snow.items() if k in cls.__dataclass_fields__}
-        return cls(**known, system_mass=rider_mass + board_mass, sidecut_radius=sidecut_radius)
+        return cls(
+            **known,
+            system_mass=rider_mass + board["mass"],
+            sidecut_radius=board["sidecut_radius_eff"],
+            edge_length=board["effective_edge"],
+        )
 
 
 def _rotate(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
@@ -73,6 +85,15 @@ def board_frame(quat: torch.Tensor, normal: torch.Tensor) -> tuple[torch.Tensor,
     return t, l, theta
 
 
+def air_drag(lin_vel: torch.Tensor, p: SnowParams) -> torch.Tensor:
+    """Quadratic air drag [world frame] on rider + board, given the rider's (pelvis) velocity (N, 3).
+
+    Apply it to the body, not the board: at speed it is the main force balancing gravity, and pulling it
+    through the feet would pitch the rider forward.
+    """
+    return -0.5 * p.air_density * p.cd_area * lin_vel.norm(dim=-1, keepdim=True) * lin_vel
+
+
 def snow_wrench(
     quat: torch.Tensor,
     lin_vel: torch.Tensor,
@@ -81,8 +102,9 @@ def snow_wrench(
     normal: torch.Tensor,
     dt: float,
     p: SnowParams,
+    slip_z: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
-    """Force and torque [world frame] that the snow and air apply to the board's centre of mass.
+    """Force and torque [world frame] that the snow applies to the board's centre of mass.
 
     Args:
         quat: (N, 4) board orientation, (x, y, z, w).
@@ -92,6 +114,8 @@ def snow_wrench(
         normal: (N, 3) unit snow-surface normal (a (3,) tensor is broadcast).
         dt: physics step [s].
         p: model parameters.
+        slip_z: (N,) grip spring deflection from the previous step [m] (None: relaxed). Carry
+            ``info["slip_z"]`` to the next call and zero it on reset.
 
     Returns:
         force (N, 3), torque (N, 3), and a dict of diagnostics (edge angle, sideslip, grip usage ...).
@@ -105,10 +129,8 @@ def snow_wrench(
     v_lat = (lin_vel * l).sum(-1)
     abs_theta = theta.abs()
 
-    # 1. glide friction (smooth sign) + air drag
+    # 1. glide friction (smooth sign)
     f_glide = (-p.mu_glide * N * torch.tanh(v_long / 0.1)).unsqueeze(-1) * t
-    speed = lin_vel.norm(dim=-1, keepdim=True)
-    f_drag = -0.5 * p.air_density * p.cd_area * speed * lin_vel
 
     # 2. sidecut steering: toe edge (θ > 0) turns toward -l, i.e. clockwise when riding nose-first.
     #    Capped so the arc never needs more lateral acceleration than the edge can hold.
@@ -120,22 +142,27 @@ def snow_wrench(
     hold = (a_max / a_needed.clamp_min(1e-6)).clamp(max=1.0)
     omega_target = -torch.sign(theta) * v_long / radius * steer * hold
     omega_n = (ang_vel * n).sum(-1)
-    tau_yaw = (p.k_yaw * (omega_target - omega_n) * steer * on_snow).unsqueeze(-1) * n
+    tau_max = mu_lat * N * p.edge_length / 4.0
+    tau_yaw = (torch.maximum(torch.minimum(p.k_yaw * (omega_target - omega_n), tau_max), -tau_max) * on_snow)
+    tau_yaw = tau_yaw.unsqueeze(-1) * n
 
-    # 3. grip: cancel a fraction of the sideslip momentum, limited by μ_lat(θ) · N
-    f_needed = -p.grip_alpha * p.system_mass * v_lat / dt
+    # 3. grip: lateral spring-damper; past μ_lat(θ) · N the spring stops stretching and the edge slides
     f_limit = mu_lat * N
+    z = (torch.zeros_like(v_lat) if slip_z is None else slip_z) + v_lat * dt
+    f_needed = -(p.grip_stiffness * z + p.grip_damping * v_lat)
     f_lat = f_needed.clamp(-f_limit, f_limit)
+    z = z.clamp(-f_limit / p.grip_stiffness, f_limit / p.grip_stiffness)
     f_grip = f_lat.unsqueeze(-1) * l
 
-    force = f_glide + f_drag + f_grip
+    force = f_glide + f_grip
     info = {
         "edge_angle": theta,
         "v_long": v_long,
         "v_lat": v_lat,
         "normal_force": N,
-        "grip_usage": f_needed.abs() / f_limit.clamp_min(1e-6),  # > 1 means the edge is slipping
+        "grip_usage": f_needed.abs() / f_limit.clamp_min(1e-6) * on_snow,  # > 1: the edge is slipping (0 airborne)
         "turn_hold": hold,  # < 1 means the carve is wider than the sidecut (edge at its limit)
         "omega_target": omega_target,
+        "slip_z": z,
     }
     return force, tau_yaw, info

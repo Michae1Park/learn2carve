@@ -34,7 +34,8 @@ snow:                     # Stage 1 — envs/snow.py (SnowParams), groomed hardp
   k_yaw: 50.0             # N·m·s, gain pulling board yaw rate toward v / (R_eff · cos θ)
   cd_area: 0.5            # m², C_d · A of rider + board, sets terminal speed
   air_density: 1.0        # kg/m³ at resort altitude
-  grip_alpha: 0.5         # fraction of sideslip cancelled per physics step (< 1 avoids jitter)
+  grip_stiffness: 20000.0 # N/m, lateral spring of the biting edge (stick-slip grip)
+  grip_damping: 800.0     # N·s/m; grip acts on the board alone, so keep it stable for the ~7 kg board end
 
 clip:                     # Stage 2
   video: data/videos/carve.mp4

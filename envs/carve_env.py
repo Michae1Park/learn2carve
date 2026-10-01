@@ -31,7 +31,7 @@ from isaaclab_physx.sim.spawners.materials import PhysxRigidBodyMaterialCfg
 
 from . import config
 from .rider import rider_cfg
-from .snow import SnowParams, snow_wrench
+from .snow import SnowParams, air_drag, snow_wrench
 
 STANCE_FILE = config.ROOT / "envs/assets/stance.yaml"
 KEY_BODIES = ["right_hand", "left_hand", "right_foot", "left_foot"]
@@ -112,10 +112,9 @@ class CarveEnv(DirectRLEnv):
         self.up = torch.tensor([0.0, 0.0, 1.0], device=self.device)
 
         self._scale_to_rider_mass(params["rider"]["mass"])
-        self.snow = SnowParams.from_config(
-            params["snow"], params["rider"]["mass"], params["board"]["mass"], params["board"]["sidecut_radius_eff"]
-        )
+        self.snow = SnowParams.from_config(params["snow"], params["board"], params["rider"]["mass"])
         self.snow_info: dict[str, torch.Tensor] = {}
+        self.slip_z = torch.zeros(self.num_envs, device=self.device)  # grip spring state (snow.py)
 
         # stance: default joint targets, and the pelvis pose relative to the board
         stance = load_stance()
@@ -164,9 +163,15 @@ class CarveEnv(DirectRLEnv):
             self.up,
             self.physics_dt,
             self.snow,
+            self.slip_z,
         )
+        self.slip_z = self.snow_info["slip_z"]
+        drag = air_drag(data.body_lin_vel_w.torch[:, self.pelvis_id], self.snow)
         self.robot.instantaneous_wrench_composer.add_forces_and_torques_index(
-            forces=force.unsqueeze(1), torques=torque.unsqueeze(1), body_ids=[self.board_id], is_global=True
+            forces=torch.stack([force, drag], dim=1),
+            torques=torch.stack([torque, torch.zeros_like(drag)], dim=1),
+            body_ids=[self.board_id, self.pelvis_id],
+            is_global=True,
         )
 
     # -- MDP -----------------------------------------------------------------------------------------------
@@ -218,6 +223,7 @@ class CarveEnv(DirectRLEnv):
             env_ids = torch.arange(self.num_envs, device=self.device)
         self.robot.reset(env_ids)
         super()._reset_idx(env_ids)
+        self.slip_z[env_ids] = 0.0
         n = len(env_ids)
 
         # board on the snow at the env origin, heading down the fall line (+x) ± start_yaw

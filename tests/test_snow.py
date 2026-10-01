@@ -5,7 +5,7 @@ import math
 import pytest
 import torch
 
-from envs.snow import SnowParams, board_frame, snow_wrench
+from envs.snow import SnowParams, air_drag, board_frame, snow_wrench
 
 UP = torch.tensor([0.0, 0.0, 1.0])
 DT = 1.0 / 120.0
@@ -30,8 +30,16 @@ def test_flat_straight_run_only_glide_and_drag():
     v = torch.tensor([[10.0, 0.0, 0.0]])
     f, tau, info = snow_wrench(quat_yaw_roll(0, 0), v, torch.zeros(1, 3), torch.tensor([600.0]), UP, DT, p)
     assert f[0, 1].abs() < 1e-4 and tau.abs().max() < 1e-4
-    expected = p.mu_glide * 600.0 * math.tanh(100.0) + 0.5 * p.air_density * p.cd_area * 100.0
-    assert f[0, 0].item() == pytest.approx(-expected, rel=1e-4)
+    assert f[0, 0].item() == pytest.approx(-p.mu_glide * 600.0 * math.tanh(100.0), rel=1e-4)
+    assert air_drag(v, p)[0, 0].item() == pytest.approx(-0.5 * p.air_density * p.cd_area * 100.0, rel=1e-4)
+
+
+def test_flat_board_resists_pivoting_up_to_edge_friction():
+    p = SnowParams()
+    spin = lambda w: snow_wrench(quat_yaw_roll(0, 0), torch.zeros(1, 3), torch.tensor([[0.0, 0.0, w]]),
+                                 torch.tensor([600.0]), UP, DT, p)[1][0, 2].item()
+    assert spin(0.2) == pytest.approx(-p.k_yaw * 0.2)  # slow pivot: damped
+    assert spin(10.0) == pytest.approx(-p.mu_flat * 600.0 * p.edge_length / 4)  # fast: capped by friction
 
 
 def test_toe_edge_turns_clockwise_when_riding_forward():
@@ -62,10 +70,12 @@ def simulate(theta_deg: float, speed: float, seconds: float = 6.0) -> tuple[floa
     yaw, omega = 0.0, torch.zeros(1, 3)
     normal_force = torch.tensor([m * 9.81])
     steps = int(seconds / DT)
-    yaws, slips = [], []
+    yaws, slips, slip_z = [], [], None
     for _ in range(steps):
         q = quat_yaw_roll(yaw, math.radians(theta_deg))
-        f, tau, info = snow_wrench(q, vel, omega, normal_force, UP, DT, p)
+        f, tau, info = snow_wrench(q, vel, omega, normal_force, UP, DT, p, slip_z)
+        f = f + air_drag(vel, p)
+        slip_z = info["slip_z"]
         vel = vel + f / m * DT
         vel[:, 2] = 0.0
         omega = omega + tau / inertia * DT
