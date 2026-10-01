@@ -16,7 +16,7 @@ from isaaclab.app import add_launcher_args, launch_simulation
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument("--hip_height", type=float, default=0.80, help="pelvis height above the board top [m]")
 parser.add_argument("--open_deg", type=float, default=20.0, help="pelvis rotation from facing the toe edge toward the nose")
-parser.add_argument("--seconds", type=float, default=3.0)
+parser.add_argument("--seconds", type=float, default=6.0)
 add_launcher_args(parser)
 args = parser.parse_args()
 
@@ -61,7 +61,7 @@ def main():
             init_state=robot_cfg.init_state.replace(pos=pelvis_pos, rot=pelvis_quat, joint_pos=GUESS),
         )
         # soft drives while settling, so the joints yield to the binding constraints instead of fighting them
-        robot_cfg.actuators["body"] = robot_cfg.actuators["body"].replace(stiffness=300.0, damping=30.0)
+        robot_cfg.actuators["body"] = robot_cfg.actuators["body"].replace(stiffness=30.0, damping=10.0)
         robot = Articulation(robot_cfg)
         sim.reset()
         print("[stance] bodies:", robot.data.body_names)
@@ -85,11 +85,15 @@ def main():
         # binding residual: foot sole frame vs. its binding frame on the board
         frames = binding_frames(board, cfg["rider"])
         sole = torch.tensor(FOOT_SOLE, device=pos.device)
-        for foot, (bind_pos, _) in frames.items():
+        for foot, (bind_pos, bind_rot) in frames.items():
             f = names.index(foot)
             sole_w = pos[f] + quat_apply(quat[f], sole)
             bind_w = bp + quat_apply(bq, torch.tensor(bind_pos, device=pos.device))
-            print(f"[stance] {foot} binding residual: {1000 * (sole_w - bind_w).norm().item():.2f} mm")
+            w, x, y, z = bind_rot  # wxyz -> xyzw
+            bind_q = quat_mul(bq, torch.tensor([x, y, z, w], device=pos.device))
+            dq = quat_mul(quat_conjugate(bind_q), quat[f])
+            ang = math.degrees(2 * math.acos(min(1.0, abs(dq[3].item()))))
+            print(f"[stance] {foot} binding residual: {1000 * (sole_w - bind_w).norm().item():.2f} mm, {ang:.2f} deg")
 
         p = names.index("pelvis")
         rel_pos = quat_apply_inverse(bq, pos[p] - bp)

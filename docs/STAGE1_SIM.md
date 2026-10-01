@@ -62,7 +62,8 @@ radius is a post-MVP refinement.
 - Fixing both feet to one board creates a closed kinematic loop. If it explodes, attach one foot via
   the articulation and the second with a separate fixed joint, or lower that joint's stiffness.
 - The upstream solver iterations (4 position / 0 velocity) can't hold the two-binding loop against snow
-  grip: the rider folds at the ankles and tips over even standing still. `rider_cfg` uses 16 / 4.
+  grip: the rider folds at the ankles and tips over even standing still. `rider_cfg` uses 32 / 4
+  (16 / 4 still sags ~0.05 rad at the hips/ankles; stiffer gains make it worse, not better).
 - A flat board needs yaw resistance too (grip spread along the edge resists pivoting). Without it the
   board spins up on its own and the turn throws the rider over. Capped at μ_lat · N · L / 4.
 - Air drag goes on the rider's body, not the board: at speed it balances gravity, and through the feet
