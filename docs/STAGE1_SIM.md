@@ -65,3 +65,6 @@ radius is a post-MVP refinement.
 - Use the board's *own* frame for θ and v_lat, not world axes. The slope is tilted.
 - 42° / 27° is a forward (carving) stance, not duck. Front-foot toe overhang is small on a 246 mm waist,
   but check that the boot collision boxes don't touch the snow at high edge angles.
+- The humanoid_28 USD authors knee/elbow (revolute) drives as `drive:X`; PhysX only reads `drive:angular`
+  on revolute joints, so they load with **no motor** and the knees fold within ~1 s.
+  `envs/rider.py::_fix_hinge_drives` copies X → angular at spawn.

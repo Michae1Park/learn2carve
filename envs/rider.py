@@ -48,6 +48,19 @@ def binding_frames(board: dict, rider: dict) -> dict[str, tuple[tuple[float, flo
     }
 
 
+def _fix_hinge_drives(stage, root: str) -> None:
+    """The USD authors its revolute (knee/elbow) drives as ``drive:X``, which PhysX ignores (revolute joints
+    read ``drive:angular``), so those joints load with no motor and the knees fold. Copy X -> angular."""
+    from pxr import Usd, UsdPhysics
+
+    for prim in Usd.PrimRange(stage.GetPrimAtPath(root)):
+        if not prim.IsA(UsdPhysics.RevoluteJoint) or not prim.HasAPI(UsdPhysics.DriveAPI, "X"):
+            continue
+        src, dst = UsdPhysics.DriveAPI(prim, "X"), UsdPhysics.DriveAPI.Apply(prim, "angular")
+        for attr in ("Type", "Stiffness", "Damping", "MaxForce", "TargetPosition", "TargetVelocity"):
+            getattr(dst, f"Create{attr}Attr")(getattr(src, f"Get{attr}Attr")().Get())
+
+
 def _author_board(stage, root: str, cfg: RiderSpawnCfg) -> None:
     from pxr import Gf, Sdf, UsdGeom, UsdPhysics
 
@@ -84,6 +97,7 @@ def _author_board(stage, root: str, cfg: RiderSpawnCfg) -> None:
 @clone
 def spawn_rider(prim_path: str, cfg: RiderSpawnCfg, translation=None, orientation=None, **kwargs):
     prim = spawn_from_usd_file(prim_path, cfg.usd_path, cfg, translation, orientation)
+    _fix_hinge_drives(prim.GetStage(), prim_path)
     _author_board(prim.GetStage(), prim_path, cfg)
     return prim
 
