@@ -119,7 +119,13 @@ def rider_cfg(stance: dict | None = None, world_pins: dict | None = None) -> Art
     spawn = RiderSpawnCfg(
         usd_path=HUMANOID_28_CFG.spawn.usd_path,
         rigid_props=HUMANOID_28_CFG.spawn.rigid_props,
-        articulation_props=HUMANOID_28_CFG.spawn.articulation_props,
+        # 4/0 solver iterations (upstream) can't hold the two-binding loop against snow grip: the rider slowly
+        # folds at the ankles and tips over. 16/4 keeps the stance within ~0.03 rad.
+        articulation_props=[
+            replace(a, solver_position_iteration_count=16, solver_velocity_iteration_count=4)
+            if hasattr(a, "solver_position_iteration_count") else a
+            for a in HUMANOID_28_CFG.spawn.articulation_props
+        ],
         copy_from_source=False,
         activate_contact_sensors=True,
         board_size=(board["length"], board["waist_width"], board["thickness"]),
