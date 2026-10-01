@@ -12,6 +12,33 @@ python scripts/sim_check.py                                  # humanoid in stanc
 python envs/snow.py --test                                   # scripted board: edge angle → turn
 ```
 
+Run with the `.venv-sim` python active, or via `scripts/py` (isolates it from ROS 2 paths and accepts the EULA).
+Scripts put the repo root on `sys.path` themselves, so `envs` imports either way.
+
+## Streaming to a laptop (WebRTC)
+
+The server is headless, so watch the sim through Isaac Sim's WebRTC Streaming Client on the laptop.
+`--livestream` **needs a mode number**. A bare `--livestream` fails with `expected one argument`.
+
+| Mode | Use when | Client connects to |
+|---|---|---|
+| `0` | streaming off (default) | — |
+| `1` | laptop over the public internet; also set `PUBLIC_IP` | the server's public IP |
+| `2` | laptop on the same LAN | `192.168.33.118` (server's `eno1`) |
+
+```bash
+python scripts/sim_check.py --livestream 2 --seconds 120                           # same LAN
+PUBLIC_IP=<server public IP> python scripts/sim_check.py --livestream 1 --seconds 120  # remote
+export LIVESTREAM=2                                          # or: stream every run without the flag
+```
+
+- Connect once Kit logs that streaming is up. Use a long `--seconds`: the default 10 s runs faster than
+  real time and can end before the client connects. `--num_envs 1` is easier to watch.
+- Ports: **TCP 49100** (signaling) and **UDP 47998** (media) must reach the server. An SSH tunnel can't
+  carry the UDP, so a remote laptop needs mode 1 with those ports open.
+- Mode 1 advertises `PUBLIC_IP`, which defaults to `127.0.0.1` if it isn't set. Mode 2 advertises the local address.
+- Same flag works for `scripts/make_stance.py`. Wiring: `isaaclab_physx/app/kit_launcher.py::_resolve_livestream_settings`.
+
 ## Changes to the forked env
 
 All dimensions come from `config.yaml` → `rider:` / `board:` (SI units).
