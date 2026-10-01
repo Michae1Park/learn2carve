@@ -37,7 +37,7 @@ v_long = velocity along the board,   v_lat = velocity across it
 1. Glide     F_long = −μ_glide · N · sign(v_long)  −  ½ ρ C_dA |v| v
 2. Sidecut   ω_target = v_long / (R_eff · cos θ) · sign(θ)      (0 when |θ| < min_edge_deg)
              τ_yaw    = k_yaw · (ω_target − ω_yaw)
-3. Grip      F_lat = −(force that cancels v_lat), clamped to |F_lat| ≤ μ_edge · N
+3. Grip      F_lat = −(k·z + c·v_lat), z = ∫v_lat (stick-slip spring), clamped to |F_lat| ≤ μ_edge · N
              → holds the line (carve) until the turn demands more grip, then slips (skid / wash-out)
 ```
 
@@ -53,15 +53,23 @@ radius is a post-MVP refinement.
 - [ ] Scripted board + 65 kg dummy mass, flat base on 15° → accelerates to a plausible top speed.
 - [ ] Scripted edge angle θ ∈ {10, 20, 30, 40}° at low speed → turn radius ≈ 7.6 · cos θ m.
 - [ ] Same θ at high speed → board washes out (grip limit reached) instead of turning tighter.
-- [ ] Humanoid in stance, held by PD only, slides straight down a gentle slope for a few seconds
-      without the board/feet joints exploding.
+- [x] Humanoid in stance, held by PD only, slides straight down a gentle slope for a few seconds
+      without the board/feet joints exploding. (~3 s on 3–5°, ~4 s on 15°; it then topples, it doesn't explode:
+      braking pitches a forward-stance rider toeward, and catching that is the policy's job.)
 
 ## Gotchas
 
 - Fixing both feet to one board creates a closed kinematic loop. If it explodes, attach one foot via
   the articulation and the second with a separate fixed joint, or lower that joint's stiffness.
-- Grip (term 3) cancels lateral velocity in one step and can jitter at 120 Hz. Cancel a fraction per
-  step, or compute it from the lateral momentum change and clamp it.
+- The upstream solver iterations (4 position / 0 velocity) can't hold the two-binding loop against snow
+  grip: the rider folds at the ankles and tips over even standing still. `rider_cfg` uses 16 / 4.
+- A flat board needs yaw resistance too (grip spread along the edge resists pivoting). Without it the
+  board spins up on its own and the turn throws the rider over. Capped at μ_lat · N · L / 4.
+- Air drag goes on the rider's body, not the board: at speed it balances gravity, and through the feet
+  it would pitch the rider forward.
+- Grip (term 3) acts on the board alone. Sizing it to cancel the whole rider's sideslip per step
+  (≈ m_system / dt) is unstable for the light board end: it shakes the board sideways at the grip limit
+  and topples a standing rider within ~1 s. Use a stick-slip spring-damper sized for the board end.
 - Use the board's *own* frame for θ and v_lat, not world axes. The slope is tilted.
 - 42° / 27° is a forward (carving) stance, not duck. Front-foot toe overhang is small on a 246 mm waist,
   but check that the boot collision boxes don't touch the snow at high edge angles.
