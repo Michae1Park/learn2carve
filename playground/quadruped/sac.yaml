@@ -1,0 +1,42 @@
+# SAC (off-policy): store every transition in a replay buffer, take gradient steps on random samples from it.
+# Fewer envs than PPO: SAC reuses old data, so it needs updates more than raw throughput.
+# Field reference: https://skrl.readthedocs.io/en/latest/api/agents/sac.html
+num_envs: 1024
+timesteps: 20000              # env steps per env
+
+models:
+  separate: True
+  policy:
+    class: GaussianMixin
+    initial_log_std: -1.0
+    network:
+      - {name: net, input: OBSERVATIONS, layers: [512, 256, 128], activations: elu}
+    output: ACTIONS
+  # Q(s, a): two critics, use the min to avoid overestimation; targets are slow-moving copies (see polyak)
+  critic_1: {class: DeterministicMixin, output: ONE, network: [{name: net, input: "concatenate([OBSERVATIONS, ACTIONS])", layers: [768, 512, 256], activations: elu}]}
+  critic_2: {class: DeterministicMixin, output: ONE, network: [{name: net, input: "concatenate([OBSERVATIONS, ACTIONS])", layers: [768, 512, 256], activations: elu}]}
+  target_critic_1: {class: DeterministicMixin, output: ONE, network: [{name: net, input: "concatenate([OBSERVATIONS, ACTIONS])", layers: [768, 512, 256], activations: elu}]}
+  target_critic_2: {class: DeterministicMixin, output: ONE, network: [{name: net, input: "concatenate([OBSERVATIONS, ACTIONS])", layers: [768, 512, 256], activations: elu}]}
+
+memory:
+  class: RandomMemory
+  memory_size: 1000             # per env -> 1M transitions
+
+agent:
+  class: SAC
+  gradient_steps: 4             # updates per env step
+  batch_size: 8192
+  discount_factor: 0.99
+  polyak: 0.005
+  learning_rate: 3.0e-4
+  learning_starts: 25           # env steps of random-ish data before learning
+  observation_preprocessor: RunningStandardScaler
+  rewards_shaper_scale: 50.0    # env rewards are x dt (~0.04/step); scale to ~1/step so the entropy bonus doesn't swamp them
+  grad_norm_clip: 1.0
+  learn_entropy: True           # auto-tune the exploration bonus toward target_entropy
+  initial_entropy_value: 0.1
+  target_entropy: -12.0         # = -action_dim
+
+trainer:
+  class: SequentialTrainer
+  environment_info: log

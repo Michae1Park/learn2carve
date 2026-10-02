@@ -1,0 +1,45 @@
+# PPO (on-policy): collect `rollouts` steps from every env, update on that batch, throw it away.
+# Field reference: https://skrl.readthedocs.io/en/latest/api/agents/ppo.html
+num_envs: 4096
+timesteps: 15000              # env steps per env (15000 / 24 rollouts = 625 updates, ~4 min)
+
+models:
+  separate: True
+  policy:
+    class: GaussianMixin
+    initial_log_std: 0.0        # exploration noise at the start (std = e^0 = 1)
+    network:
+      - {name: net, input: OBSERVATIONS, layers: [512, 256, 128], activations: elu}
+    output: ACTIONS
+  value:
+    class: DeterministicMixin
+    network:
+      - {name: net, input: OBSERVATIONS, layers: [512, 256, 128], activations: elu}
+    output: ONE
+
+memory:
+  class: RandomMemory
+  memory_size: -1               # = rollouts
+
+agent:
+  class: PPO
+  rollouts: 24                  # steps per env per update (24 x 4096 = 98k samples)
+  learning_epochs: 5
+  mini_batches: 4
+  discount_factor: 0.99
+  gae_lambda: 0.95
+  learning_rate: 1.0e-3
+  learning_rate_scheduler: KLAdaptiveLR   # shrinks lr when the policy changes too fast
+  learning_rate_scheduler_kwargs: {kl_threshold: 0.01}
+  observation_preprocessor: RunningStandardScaler
+  value_preprocessor: RunningStandardScaler
+  grad_norm_clip: 1.0
+  ratio_clip: 0.2
+  value_clip: 0.2
+  entropy_loss_scale: 0.01      # bonus for keeping exploration noise
+  value_loss_scale: 1.0
+  time_limit_bootstrap: True
+
+trainer:
+  class: SequentialTrainer
+  environment_info: log
