@@ -1,7 +1,7 @@
-"""Run a trained policy with a fixed velocity command and print each foot's contact pattern.
+"""Run a trained walking policy with a fixed velocity command and print each foot's contact pattern.
 
-    scripts/py playground/quadruped/play.py logs/playground/quadruped/<run>
-    scripts/py playground/quadruped/play.py <run> --cmd 1.0 0 0 --livestream 2 --seconds 60
+    scripts/py playground/quadruped/walk/play.py logs/playground/quadruped/<run>
+    scripts/py playground/quadruped/walk/play.py <run> --cmd 1.0 0 0 --livestream 2 --seconds 60
 
 Prints a footfall diagram of env 0 (█ = foot on the ground) so you can tell walk / trot / pace apart headless:
 
@@ -12,18 +12,18 @@ Prints a footfall diagram of env 0 (█ = foot on the ground) so you can tell wa
 """
 
 import argparse
+import sys
 from pathlib import Path
 
-from common import make_env
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # repo root, so this runs with plain python too
+
+from playground.quadruped.common import add_play_args, close_view_cfg, load_policy, make_env
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-parser.add_argument("run", type=Path, help="run directory from train.py")
-parser.add_argument("--checkpoint", default="best_agent.pt", help="file in <run>/checkpoints/")
+add_play_args(parser)
 parser.add_argument("--cmd", type=float, nargs=3, default=(0.8, 0.0, 0.0), metavar=("VX", "VY", "YAW"))
-parser.add_argument("--num_envs", type=int, default=16)
-parser.add_argument("--seconds", type=float, default=10.0)
 add_launcher_args(parser)
 args = parser.parse_args()
 
@@ -40,20 +40,12 @@ def main():
 
     sim_cfg = sim_utils.SimulationCfg()
     with launch_simulation(sim_cfg, args):
-        from isaaclab_rl.skrl import SkrlVecEnvWrapper
-        from skrl.utils.runner.torch import Runner
+        from playground.quadruped.go2 import FEET
+        from playground.quadruped.walk.env import Go2Env, Go2EnvCfg
 
-        from common import load_agent_cfg
-        from playground.quadruped.env import FEET
-
-        raw_env = make_env(run["gait"], overrides, args.num_envs, sim_cfg)
-        env = SkrlVecEnvWrapper(raw_env)
-        agent_cfg = load_agent_cfg(run["algo"])
-        agent_cfg["agent"]["experiment"] = {"write_interval": 0, "checkpoint_interval": 0}
-        agent_cfg["trainer"]["close_environment_at_exit"] = False
-        agent = Runner(env, agent_cfg).agent
-        agent.load(str(args.run / "checkpoints" / args.checkpoint))
-        agent.enable_training_mode(False, apply_to_models=True)
+        overrides["viewer"] = close_view_cfg()
+        raw_env = make_env(Go2Env, Go2EnvCfg(gait=run["gait"]), overrides, args.num_envs, sim_cfg, args.suppress_warnings)
+        env, agent = load_policy(raw_env, run, args.run, args.checkpoint)
 
         steps = int(args.seconds / raw_env.step_dt)
         contacts, speeds = [], []
@@ -62,8 +54,7 @@ def main():
             with torch.inference_mode():
                 actions, outputs = agent.act(obs, None, timestep=t, timesteps=steps)
                 obs, *_ = env.step(outputs.get("mean_actions", actions))
-            forces = raw_env.contact.data.net_normal_forces_w.torch[0, raw_env.feet].norm(dim=-1)
-            contacts.append((forces > 1.0).tolist())
+            contacts.append(raw_env.feet_in_contact()[0].tolist())
             speeds.append(raw_env.robot.data.root_lin_vel_b.torch[:, 0].mean().item())
 
         window = contacts[-50:]  # last second at 50 Hz

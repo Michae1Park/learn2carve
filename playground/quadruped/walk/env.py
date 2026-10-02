@@ -17,17 +17,9 @@ import math
 
 import torch
 
-import isaaclab.sim as sim_utils
-from isaaclab.assets import AssetBaseCfg
-from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg, ViewerCfg
-from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import ContactSensorCfg
-from isaaclab.sim import SimulationCfg
-from isaaclab.terrains import TerrainImporterCfg
-from isaaclab.utils import configclass, index_fill_, replace
-from isaaclab_assets.robots.unitree import UNITREE_GO2_CFG
+from isaaclab.utils import configclass
 
-FEET = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
+from playground.quadruped.go2 import Go2BaseEnv, Go2BaseEnvCfg
 
 # Per-foot phase offsets (FL, FR, RL, RR) in cycles, stance fraction ("duty"), and cycle frequency [Hz].
 # A foot is in stance while (clock + offset) mod 1 < duty.
@@ -39,34 +31,11 @@ GAITS = {
 
 
 @configclass
-class SceneCfg(InteractiveSceneCfg):
-    terrain = TerrainImporterCfg(
-        prim_path="/World/ground",
-        terrain_type="plane",
-        collision_group=-1,
-        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.12, 0.14, 0.18)),  # dark, so the white Go2 stands out
-    )
-    robot = replace(UNITREE_GO2_CFG, prim_path="{ENV_REGEX_NS}/Robot")
-    contact = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
-    light = AssetBaseCfg(prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=2000.0))
-
-
-@configclass
-class Go2EnvCfg(DirectRLEnvCfg):
+class Go2EnvCfg(Go2BaseEnvCfg):
     episode_length_s = 20.0
-    decimation = 4  # policy at 50 Hz, physics at 200 Hz
-    action_space = 12
     observation_space = 56  # 48 proprioception + 8 clock (sin, cos per foot)
-    state_space = 0
-    sim: SimulationCfg = SimulationCfg(dt=1 / 200, render_interval=decimation)
-    scene: SceneCfg = SceneCfg(num_envs=4096, env_spacing=2.5)
-    # free camera starting with an overview of the env grid (centred on the origin); orbit/zoom in the client.
-    # To follow one robot instead: ViewerCfg(eye=(1.5, 1.5, 0.8), origin_type="asset_root", asset_name="robot")
-    viewer: ViewerCfg = ViewerCfg(eye=(30.0, 30.0, 20.0), lookat=(0.0, 0.0, 0.0))
 
     gait: str = "free"  # free | walk | trot | pace
-    action_scale = 0.25  # rad per unit action
-    action_clip = 5.0
     base_height_target = 0.30  # m; the default pose sags to ~0.29 under gravity
 
     # command ranges: forward [m/s], sideways [m/s], yaw rate [rad/s]
@@ -89,19 +58,12 @@ class Go2EnvCfg(DirectRLEnvCfg):
     rew_gait = 1.0  # fraction of feet whose contact matches the clock (clock gaits only)
 
 
-class Go2Env(DirectRLEnv):
+class Go2Env(Go2BaseEnv):
     cfg: Go2EnvCfg
 
     def __init__(self, cfg: Go2EnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
-        self.robot = self.scene["robot"]
-        self.contact = self.scene["contact"]
-        self.feet, _ = self.contact.find_sensors(FEET, preserve_order=True)
-        self.base, _ = self.contact.find_sensors("base")
-
         n = self.num_envs
-        self.actions = torch.zeros(n, 12, device=self.device)
-        self.prev_actions = torch.zeros(n, 12, device=self.device)
         self.cmd = torch.zeros(n, 3, device=self.device)
         self.clock = torch.zeros(n, device=self.device)  # gait cycle phase in [0, 1)
         gait = GAITS.get(cfg.gait)
@@ -110,17 +72,9 @@ class Go2Env(DirectRLEnv):
         self.gait = gait
         if gait:
             self.offsets = torch.tensor(gait["offsets"], device=self.device)
-        self.episode_sums: dict[str, torch.Tensor] = {}
 
     def foot_phase(self) -> torch.Tensor:
         return (self.clock.unsqueeze(1) + self.offsets) % 1.0  # (n, 4)
-
-    def _pre_physics_step(self, actions: torch.Tensor):
-        self.actions = actions.clamp(-self.cfg.action_clip, self.cfg.action_clip)
-        self.targets = self.robot.data.default_joint_pos.torch + self.cfg.action_scale * self.actions
-
-    def _apply_action(self):
-        self.robot.set_joint_position_target_index(target=self.targets)
 
     def _get_observations(self) -> dict:
         self.prev_actions = self.actions.clone()
@@ -169,51 +123,19 @@ class Go2Env(DirectRLEnv):
             "base_height": (d.root_pos_w.torch[:, 2] - self.cfg.base_height_target) ** 2,
         }
         if self.gait:
-            in_contact = self.contact.data.net_normal_forces_w.torch[:, self.feet].norm(dim=-1) > 1.0
             want_contact = self.foot_phase() < self.gait["duty"]
-            terms["gait"] = (in_contact == want_contact).float().mean(dim=1)
-
-        reward = torch.zeros(self.num_envs, device=self.device)
-        for name, value in terms.items():
-            r = getattr(self.cfg, f"rew_{name}") * value * self.step_dt
-            reward += r
-            self.episode_sums.setdefault(name, torch.zeros_like(r))
-            self.episode_sums[name] += r
-        return reward
+            terms["gait"] = (self.feet_in_contact() == want_contact).float().mean(dim=1)
+        return self.sum_rewards(terms)
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
-        base_force = self.contact.data.net_normal_forces_w_history.torch[:, :, self.base].norm(dim=-1)
-        fell = (base_force.max(dim=1).values > 1.0).any(dim=1)
-        return fell, time_out
+        return self.fell(), time_out
 
     def _reset_idx(self, env_ids: torch.Tensor | None):
-        if env_ids is None or len(env_ids) == self.num_envs:
-            env_ids = torch.arange(self.num_envs, device=self.device)
-        self.robot.reset(env_ids)
-        super()._reset_idx(env_ids)
+        env_ids = super()._reset_idx(env_ids)
         if len(env_ids) == self.num_envs:  # spread resets so all envs don't time out together
             self.episode_length_buf[:] = torch.randint_like(self.episode_length_buf, int(self.max_episode_length))
-
-        # log each reward term's per-second average over the finished episodes (shows up in TensorBoard)
-        self.extras["log"] = {
-            f"Episode_Reward/{k}": v[env_ids].mean() / self.max_episode_length_s for k, v in self.episode_sums.items()
-        }
-        self.extras["log"]["Episode_Termination/fell"] = self.reset_terminated[env_ids].float().mean()
-        for v in self.episode_sums.values():
-            index_fill_(v, env_ids, 0.0)
-
-        index_fill_(self.actions, env_ids, 0.0)
-        index_fill_(self.prev_actions, env_ids, 0.0)
         k = len(env_ids)
         for i, (lo, hi) in enumerate((self.cfg.cmd_vx, self.cfg.cmd_vy, self.cfg.cmd_yaw)):
             self.cmd[env_ids, i] = torch.empty(k, device=self.device).uniform_(lo, hi)
         self.clock[env_ids] = torch.rand(k, device=self.device)
-
-        d = self.robot.data
-        root_pose = d.default_root_pose.torch[env_ids].clone()
-        root_pose[:, :3] += self.scene.env_origins[env_ids]
-        self.robot.write_root_pose_to_sim_index(root_pose=root_pose, env_ids=env_ids)
-        self.robot.write_root_velocity_to_sim_index(root_velocity=d.default_root_vel.torch[env_ids], env_ids=env_ids)
-        self.robot.write_joint_position_to_sim_index(position=d.default_joint_pos.torch[env_ids], env_ids=env_ids)
-        self.robot.write_joint_velocity_to_sim_index(velocity=d.default_joint_vel.torch[env_ids], env_ids=env_ids)
