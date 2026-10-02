@@ -39,11 +39,11 @@ import isaaclab.sim as sim_utils
 
 def main():
     with launch_simulation(sim_utils.SimulationCfg(), args):  # PhysX + Kit
-        from envs.carve_env import CarveEnv, CarveEnvCfg, tilted_gravity
+        from envs.carve_env import CarveEnv, CarveEnvCfg
 
         cfg = CarveEnvCfg()
         if args.slope is not None:
-            cfg.sim.gravity = tilted_gravity(args.slope)
+            cfg.slope_deg = args.slope
         if args.start_speed is not None:
             cfg.start_speed = (args.start_speed, args.start_speed)
         cfg.scene.num_envs = args.num_envs
@@ -72,11 +72,11 @@ def main():
             fell_at[newly] = step * env.step_dt
             alive &= ~terminated
             info = env.snow_info
-            board_vel = env.robot.data.body_lin_vel_w.torch[:, env.board_id]
+            board_vel = env.body_lin_vel(env.board_id)
             if step >= hold_steps:
                 log["edge"].append(torch.rad2deg(info["edge_angle"]))
                 log["speed"].append(board_vel[:, :2].norm(dim=-1))
-                log["yaw_rate"].append(env.robot.data.body_ang_vel_w.torch[:, env.board_id, 2])
+                log["yaw_rate"].append(env.body_ang_vel(env.board_id)[:, 2])
                 log["grip"].append(info["grip_usage"])
                 log["slip"].append(info["v_lat"].abs())
 
