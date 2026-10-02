@@ -10,6 +10,8 @@
 | D-004 | 2026-10-01 | Coarse snow model: glide + sidecut steering + edge grip limit | Accepted |
 | D-005 | 2026-10-01 | Build the sim before the clip | Accepted |
 | D-006 | 2026-10-01 | Annealed pelvis assist force during training | Accepted |
+| D-007 | 2026-10-02 | RL-only snowboard playground (side slip, skid, carve) before the clip | Accepted |
+| D-008 | 2026-10-02 | Mountain = tilted ground + real gravity, env works in a slope frame | Accepted |
 
 ### D-001
 Smallest thing that demonstrates "LfD + RL teaches a carve". Multiple styles, terrain curriculum,
@@ -45,6 +47,21 @@ riskiest part. The clip pipeline then has a concrete target to retarget onto.
 The snow model is approximate and the YouTube motion won't match our slope, speed or turn radius exactly,
 so early training can stall at "falls immediately". A small force on the pelvis (residual force control)
 helps keep the rider up and is annealed to 0 over training (`config.yaml` → `train.assist`).
+
+### D-007
+Before any demo exists, check that plain PPO on the Stage 1 env can ride at all (`playground/snowboard/`). All
+three tasks are one env with two time-varying targets: path heading relative to the fall line and slip angle
+(board axis vs. travel direction). Side slip = straight down at -90° slip, skid = sine heading with slip peaking
+mid-turn, carve = sine heading at zero slip. No AMP, no assist force: the reward alone gets a side slip and a skidded S. A carve
+holds a thin S for ~10 s and then speeds up until the turns flatten (results in `playground/snowboard/README.md`).
+Policies from here are a baseline for Stage 4's "with vs. without demo" comparison.
+
+### D-008
+Tilted gravity on flat ground (D-004 era) looks wrong in the viewer: the rider leans and slides on a level floor.
+The ground plane is now tilted instead (`CarveEnvCfg.mountain`), gravity points down, and `envs/mountain.py` adds
+visual-only scenery. To keep the MDP identical, the env converts every read into a slope frame (x downhill, z =
+snow normal) and every write back to the world, so observations, rewards and the snow model don't change and
+policies transfer between the two modes. Stage 1 checks keep the flat mode (`mountain = False`).
 
 ## Issues
 
