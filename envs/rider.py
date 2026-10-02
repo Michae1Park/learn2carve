@@ -26,6 +26,15 @@ from isaaclab_assets import HUMANOID_28_CFG
 
 from . import config
 
+# Outfit, by body name prefix: bright jacket and blue board stand out on white snow and against the sky
+OUTFIT = {
+    "jacket": ((0.85, 0.07, 0.05), ("pelvis", "torso", "right_upper_arm", "left_upper_arm", "right_lower_arm",
+                                    "left_lower_arm")),
+    "pants": ((0.03, 0.03, 0.035), ("right_thigh", "left_thigh", "right_shin", "left_shin")),
+    "dark": ((0.03, 0.03, 0.03), ("head", "right_hand", "left_hand", "right_foot", "left_foot")),  # helmet, gloves, boots
+}
+BOARD_COLOR = (0.05, 0.30, 0.95)
+
 # Sole centre of the humanoid's foot box, in the foot body frame (box centre (0.045, 0, -0.0225), half-height 0.0275)
 FOOT_SOLE = (0.045, 0.0, -0.05)
 HUMANOID_HEIGHT = 1.612  # m, sole to top of head in the zero pose
@@ -72,7 +81,7 @@ def _author_board(stage, root: str, cfg: RiderSpawnCfg) -> None:
     geom = UsdGeom.Cube.Define(stage, f"{board_path}/geometry")
     geom.CreateSizeAttr(1.0)
     geom.AddScaleOp().Set(Gf.Vec3f(*cfg.board_size))
-    geom.CreateDisplayColorAttr([Gf.Vec3f(0.85, 0.25, 0.1)])
+    geom.CreateDisplayColorAttr([Gf.Vec3f(*BOARD_COLOR)])
     UsdPhysics.CollisionAPI.Apply(geom.GetPrim())
 
     def fixed_joint(name: str, body0: str | None, body1: str, pos0, rot0, pos1, rot1, in_tree: bool) -> None:
@@ -94,11 +103,30 @@ def _author_board(stage, root: str, cfg: RiderSpawnCfg) -> None:
         fixed_joint(f"{body}_pin", None, f"{root}/{body}", pos, rot, (0.0, 0.0, 0.0), identity, in_tree=False)
 
 
+def _dress(stage, root: str) -> None:
+    """Recolour the humanoid (it ships light grey, hard to see on snow). Its visuals are instanced with their own
+    materials, so make them editable and bind ours over them."""
+    import isaaclab.sim as sim_utils
+    from isaaclab.sim.utils.prims import bind_visual_material
+
+    for name, (color, bodies) in OUTFIT.items():
+        material = f"{root}/Looks/{name}"
+        look = sim_utils.PreviewSurfaceCfg(diffuse_color=color, roughness=0.6)
+        look.func(material, look)
+        for body in bodies:
+            visuals = stage.GetPrimAtPath(f"{root}/{body}/visuals")
+            if not visuals.IsValid():
+                continue
+            visuals.SetInstanceable(False)
+            bind_visual_material(str(visuals.GetPath()), material, stage=stage, stronger_than_descendants=True)
+
+
 @clone
 def spawn_rider(prim_path: str, cfg: RiderSpawnCfg, translation=None, orientation=None, **kwargs):
     prim = spawn_from_usd_file(prim_path, cfg.usd_path, cfg, translation, orientation)
     _fix_hinge_drives(prim.GetStage(), prim_path)
     _author_board(prim.GetStage(), prim_path, cfg)
+    _dress(prim.GetStage(), prim_path)
     return prim
 
 
