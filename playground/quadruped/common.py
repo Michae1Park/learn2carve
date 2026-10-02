@@ -49,14 +49,17 @@ def parse_overrides(pairs: list[str]) -> dict:
     return out
 
 
-def load_agent_cfg(algo: str) -> dict:
-    return yaml.safe_load((HERE / f"{algo}.yaml").read_text())
+def load_agent_cfg(algo: str, cfg_dir: Path = HERE) -> dict:
+    return yaml.safe_load((cfg_dir / f"{algo}.yaml").read_text())
 
 
-def new_run(args, task: str, **extra) -> tuple[Path, dict, dict]:
-    """Create logs/playground/quadruped/<time>_<algo>_<task>/ with a run.yaml. Returns (run_dir, run, agent_cfg)."""
-    agent_cfg = load_agent_cfg(args.algo)
-    run_dir = LOG_ROOT / f"{datetime.now():%Y-%m-%d_%H-%M-%S}_{args.algo}_{task}"
+def new_run(args, task: str, cfg_dir: Path = HERE, log_root: Path = LOG_ROOT, **extra) -> tuple[Path, dict, dict]:
+    """Create <log_root>/<time>_<algo>_<task>/ with a run.yaml. Returns (run_dir, run, agent_cfg).
+
+    cfg_dir / log_root default to the quadruped's; other playgrounds (e.g. playground/snowboard) pass their own.
+    """
+    agent_cfg = load_agent_cfg(args.algo, cfg_dir)
+    run_dir = log_root / f"{datetime.now():%Y-%m-%d_%H-%M-%S}_{args.algo}_{task}"
     run_dir.mkdir(parents=True)
     run = {
         "task": task,
@@ -104,7 +107,7 @@ def train(raw_env, agent_cfg: dict, run_dir: Path, run: dict, seed: int):
 
     timesteps = run["timesteps"]
     agent_cfg["seed"] = seed
-    agent_cfg["agent"]["experiment"] = {"directory": str(LOG_ROOT), "experiment_name": run_dir.name}
+    agent_cfg["agent"]["experiment"] = {"directory": str(run_dir.parent), "experiment_name": run_dir.name}
     agent_cfg["trainer"]["timesteps"] = timesteps
     agent_cfg["trainer"]["close_environment_at_exit"] = False
 
@@ -120,13 +123,13 @@ def train(raw_env, agent_cfg: dict, run_dir: Path, run: dict, seed: int):
     env.close()
 
 
-def load_policy(raw_env, run: dict, run_dir: Path, checkpoint: str):
+def load_policy(raw_env, run: dict, run_dir: Path, checkpoint: str, cfg_dir: Path = HERE):
     """Wrap the env for skrl and load a trained agent in eval mode. Returns (env, agent)."""
     from isaaclab_rl.skrl import SkrlVecEnvWrapper
     from skrl.utils.runner.torch import Runner
 
     env = SkrlVecEnvWrapper(raw_env)
-    agent_cfg = load_agent_cfg(run["algo"])
+    agent_cfg = load_agent_cfg(run["algo"], cfg_dir)
     agent_cfg["agent"]["experiment"] = {"write_interval": 0, "checkpoint_interval": 0}
     agent_cfg["trainer"]["close_environment_at_exit"] = False
     agent = Runner(env, agent_cfg).agent
