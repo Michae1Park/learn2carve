@@ -1,38 +1,81 @@
-# Playground: Go2 quadruped gaits (PPO / SAC)
+# Playground: Go2 quadruped (PPO / SAC)
 
-A warm-up before the snowboarder. A Unitree Go2 learns to follow a velocity command on flat ground, trained with
-**PPO** or **SAC**. The gait is either left to emerge from the rewards (`free`) or imposed with a clock
-(`walk`, `trot`, `pace`).
+A warm-up before the snowboarder. A Unitree Go2 learns two separate tasks on flat ground:
 
-| File | What |
+- **Walk**: follow a velocity command, with an emergent or clock-imposed gait.
+- **Backflip**: jump, rotate backward 360° and land, once per 2 s episode.
+
+## Files
+
+| Path | What |
 |---|---|
-| `env.py` | The whole MDP: observations, actions, rewards, terminations, gait clock |
-| `ppo.yaml`, `sac.yaml` | Networks + algorithm hyperparameters (skrl) |
-| `train.py` | `--algo ppo\|sac --gait free\|walk\|trot\|pace --set key=value ...` |
-| `play.py` | Runs a trained policy with a fixed command and prints a footfall diagram |
+| `common.py` | **Shared.** Run folders, `--set` overrides, train loop, policy loading, play camera |
+| `go2.py` | **Shared.** Scene, robot, actions, reward bookkeeping, reset to stance |
+| `ppo.yaml`, `sac.yaml` | **Shared.** Networks + algorithm hyperparameters (skrl) |
+| `walk/` | `env.py` (walking MDP), `train.py`, `play.py` |
+| `backflip/` | `env.py` (backflip MDP), `train.py`, `play.py` |
 
-## Run
+Runs from both tasks land in `logs/playground/quadruped/<date>_<time>_<algo>_<task>/`.
+
+## Walk: train and play
 
 ```bash
-scripts/py playground/quadruped/train.py --algo ppo --gait free          # emergent gait
-scripts/py playground/quadruped/train.py --algo ppo --gait pace          # clock-imposed gait
-scripts/py playground/quadruped/train.py --algo sac --gait trot
+# train (~4 min with PPO)
+scripts/py playground/quadruped/walk/train.py --algo ppo --gait trot     # or free | walk | pace
+scripts/py playground/quadruped/walk/train.py --algo sac --gait trot
 
-scripts/py playground/quadruped/play.py logs/playground/quadruped/<run> --cmd 1.0 0 0
-scripts/py playground/quadruped/play.py <run> --livestream 2 --seconds 120 # watch it (see docs/STAGE1_SIM.md)
-
-.venv-sim/bin/tensorboard --logdir logs/playground/quadruped                # curves, per-term rewards
+# play
+scripts/py playground/quadruped/walk/play.py logs/playground/quadruped/<run> --livestream 2 --seconds 60
+scripts/py playground/quadruped/walk/play.py logs/playground/quadruped/<run> --cmd 1.0 0 0   # vx vy yaw
 ```
 
-`Ctrl+C` stops training early and still saves a checkpoint.
+Play prints the speed and a footfall diagram.
 
-**Watch it learn.** Add `--livestream 2` to `train.py` and connect the WebRTC client (see `docs/STAGE1_SIM.md`).
-The robots on screen always run the current policy, so you see falls turn into steps as updates land. This is
-about 2.5× slower than headless training (every frame is rendered), and Kit's first start takes a few
-minutes. Each robot you see is one of the `num_envs` parallel copies. Run TensorBoard (with
-`--bind_all`, port 6006) alongside it for the numbers.
+## Backflip: train and play
 
-## The MDP (`env.py`)
+```bash
+# train (PPO, 30k steps by default)
+scripts/py playground/quadruped/backflip/train.py
+
+# play
+scripts/py playground/quadruped/backflip/play.py logs/playground/quadruped/<run> --livestream 2 --seconds 60
+```
+
+Play prints one line per attempt (`rotations`, `landed` / `fell`, `FLIP`) and a total.
+
+**Is it learning?** In TensorBoard, watch `Episode_Flip/rotations` (1.0 = one full flip) and
+`Episode_Flip/success`. Early on it throws itself backward and crashes (`fell` near 1.0). That's normal: it
+earns partial rotation credit. A 6k-step test went from 0 to 0.13 rotations. A full flip is **untested**, so
+expect to tune (see [Backflip: knobs](#backflip-knobs)).
+
+## Options (both tasks)
+
+| Option | What it does |
+|---|---|
+| `<run>` | The folder `train.py` prints, e.g. `logs/playground/quadruped/2026-10-02_13-07-58_ppo_trot` |
+| `--checkpoint agent_4000.pt` | Checkpoint from `<run>/checkpoints/` (default `best_agent.pt`). `ls` it first |
+| `--set key=value` | Override an env field when training, e.g. `--set rew_gait=3 "cmd_vx=[0.5,1.5]"` |
+| `--num_envs N` | Robots on screen. Play defaults to 1 |
+| `--livestream 0` | No video (default) |
+| `--livestream 1` | Stream over the internet. Needs `PUBLIC_IP=<ip>` and TCP 49100 + UDP 47998 open |
+| `--livestream 2` | Stream on the LAN. Connect the WebRTC client to `192.168.33.118` |
+| `--suppress_warnings false` | Show the ~4800 harmless `Failed to find rigid body` warnings (hidden by default) |
+| `Ctrl+C` | Stop training early; still saves a checkpoint |
+
+**Livestream tips**
+- Connect once Kit logs that streaming is up (first start takes a few minutes).
+- Use a long `--seconds` with play, or it ends before you connect.
+- The camera starts close; orbit and zoom freely. It doesn't follow the robot.
+- Streaming training is ~2.5× slower. More in `docs/STAGE1_SIM.md`.
+
+**Safe to ignore at startup**
+- 3 × `[Error] ... CUDA error ... capturing blocking stream` / `Failed to fetch DOF position attribute`:
+  a one-time read clash at startup; the next step reads the state again.
+- `env_cfg.viewer is deprecated`: Isaac Lab forwards the setting automatically.
+
+**TensorBoard:** `.venv-sim/bin/tensorboard --logdir logs/playground/quadruped --bind_all` (port 6006)
+
+## Walk: the MDP (`walk/env.py`)
 
 | | |
 |---|---|
@@ -42,7 +85,7 @@ minutes. Each robot you see is one of the `num_envs` parallel copies. Run Tensor
 | **Done** | base touches the ground, or 20 s |
 | **Command** | random (vx, vy, yaw rate) per episode |
 
-## Gaits
+## Walk: gaits
 
 **`free`.** No clock. The only gait-related term is `rew_air_time`, which rewards steps that last longer than
 0.5 s. With the default weights, PPO tracks the command well but with an irregular, shuffling footfall. You
@@ -60,7 +103,7 @@ feet that match. The policy sees the clock, so it can learn to step in time with
 
 A new gait is one line in `GAITS`. For example, bound (fronts together, rears together) is `(0, 0, .5, .5)`.
 
-## Knobs to play with
+## Walk: knobs
 
 Pass any `Go2EnvCfg` field with `--set`, e.g. `--set rew_gait=3 "cmd_vx=[0.5,1.5]"`.
 
@@ -74,7 +117,7 @@ Pass any `Go2EnvCfg` field with `--set`, e.g. `--set rew_gait=3 "cmd_vx=[0.5,1.5
 | `rew_torque` | -2e-3 | lazier, energy-saving gait |
 | `cmd_vx` | `[1.5,2.5]` | fast commands push `free` toward bounding/galloping |
 | `action_scale` | 0.1 / 0.5 | smaller = stiff, easier to learn; larger = more reach, more chaos |
-| `GAITS[...]["freq"]` | 1 → 3 Hz | step frequency (edit `env.py`) |
+| `GAITS[...]["freq"]` | 1 → 3 Hz | step frequency (edit `walk/env.py`) |
 
 In `ppo.yaml` / `sac.yaml`:
 
@@ -89,6 +132,36 @@ In `ppo.yaml` / `sac.yaml`:
 
 TensorBoard shows each reward term separately under `Episode_Reward/*`. Watch which term moves when you
 change a weight.
+
+## Backflip: the MDP (`backflip/env.py`)
+
+Every episode follows the same 2 s timeline, and the policy sees it as a phase in [0, 1]:
+
+```
+0 s ───── 0.5 s ═══════ 1.0 s ──────────── 2.0 s
+  stand / crouch   jump + rotate    land, stand still
+```
+
+| | |
+|---|---|
+| **Observation** (47) | base lin/ang velocity, gravity direction, joint pos/vel, last action, phase, flip progress (rotations so far) |
+| **Action** (12) | joint position targets = default pose + 0.5 · action (twice the walk's, to jump high enough) |
+| **Main reward** | `track_flip`: the flip angle should follow a target that ramps 0 → 360° across the jump window |
+| **Helper rewards** | `spin` (backward pitch rate) and `height` in the window; `feet_down` and `pose` outside it |
+| **Done** | base or head touches the ground, or 2 s. All robots start in sync (no reset spreading) |
+
+## Backflip: knobs
+
+Pass any `BackflipEnvCfg` field with `--set`.
+
+| Knob | Try | Expect |
+|---|---|---|
+| `rew_height` | 20 | jumps higher, more airtime to finish the rotation |
+| `rew_spin` | 1.0 | spins harder; too high and it over-rotates or tumbles |
+| `rew_track_flip` | 10 | sticks closer to the 0 → 360° schedule |
+| `action_scale` | 0.7 | more leg travel and a stronger push-off, but noisier early on |
+| `flip_start`, `flip_end` | 0.5, 1.1 | a longer window gives a slower, easier rotation |
+| `--timesteps` | 60000 | more training if `rotations` is still climbing |
 
 ## PPO vs SAC in one paragraph
 
