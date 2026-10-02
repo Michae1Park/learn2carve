@@ -224,3 +224,6 @@ logs/
 outputs/
 data/videos/
 envs/assets/src/
+
+# Isaac Sim WebRTC streamer traces
+*.etli
