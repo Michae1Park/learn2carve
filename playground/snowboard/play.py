@@ -2,21 +2,16 @@
 
     scripts/py playground/snowboard/play.py logs/playground/snowboard/<run>
     scripts/py playground/snowboard/play.py <run> --livestream 2 --seconds 120
-    scripts/py playground/snowboard/play.py --no_policy --task sideslip      # stance held, zero actions
     scripts/py playground/snowboard/play.py <run> --livestream 2 --follow    # camera tracks the rider
+    scripts/py playground/snowboard/play.py --no_policy --task sideslip      # stance held, zero actions
 
-Short evaluation runs: each run ends --run_length metres down the piste (default two full S's = 2 × turn length;
-25 m for the side slip), always starting the same way (centre of the piste, same phase, mid-range speed and turn
-length), then the rider is put back at the top for the next run. Play lasts --seconds in total.
+Play is a series of short runs, each starting the same way (piste centre, phase 0, mid-range speed and turn length)
+and ending --run_length metres down (default two S's; 25 m for the side slip). The rider then returns to the top.
+--seconds is the total play time. One line is printed per run (env 0), and the longest run's track is saved to
+<run>/trail.png.
 
-Camera: low on the snow at the bottom of the run, looking up at the start through a longer lens, so the rider
-carves toward you (like a filmed carving clip). It then stays put: orbit, pan and zoom freely. --cam_x moves it
-up or down the run, --follow tracks the rider instead.
-
-Prints one line per run for env 0: how it ended (done / fell / fence), seconds, speed, mean heading / slip / line
-errors, widest swing |y| and how many times the path crossed the fall line (each crossing is one turn). Saves the
-longest run's track, with the target line and the fences, to <run>/trail.png (or logs/playground/snowboard/
-no_policy_<task>_trail.png).
+The camera starts low on the snow at the bottom of the run, looking up at the start, then it is yours (orbit, pan,
+zoom). --cam_x moves it along the run; --follow tracks the rider instead.
 """
 
 import argparse
@@ -26,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so this runs with plain python too
 
-from playground.quadruped.common import ROOT, add_suppress_arg, load_policy, make_env
+from playground.quadruped.common import ROOT, add_suppress_arg, load_policy, make_env, parse_overrides
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
@@ -56,108 +51,140 @@ import yaml
 
 import isaaclab.sim as sim_utils
 
-from playground.quadruped.common import parse_overrides
+
+class RunStats:
+    """Averages over one run of env 0, printed as one line."""
+
+    HEADER = "run  end    seconds  speed  |edge|°  heading_err°  slip_err°  line_err_m  max|y|_m  turns"
+
+    def __init__(self):
+        self.steps = 0
+        self.sums = dict.fromkeys(("speed", "edge", "heading_err", "slip_err", "line_err"), 0.0)
+        self.max_y = 0.0
+        self.turns = 0  # each time the path crosses the fall line
+        self.side = 0  # which side of the fall line the path points to: -1, 0 (unknown yet), 1
+
+    def add(self, env):
+        t = env.tracking()
+        heading = env.path_heading()[0].item()
+        side = 1 if heading > 0.05 else (-1 if heading < -0.05 else 0)
+        if side and self.side and side != self.side:
+            self.turns += 1
+        self.side = side or self.side
+
+        self.steps += 1
+        self.sums["speed"] += env.board_speed()[0].item()
+        self.sums["edge"] += abs(math.degrees(env.snow_info["edge_angle"][0].item()))
+        self.sums["heading_err"] += abs(math.degrees(t.e_heading[0].item()))
+        self.sums["slip_err"] += abs(math.degrees(t.e_slip[0].item()))
+        self.sums["line_err"] += abs(t.e_line[0].item())
+        self.max_y = max(self.max_y, abs(env.position()[0, 1].item()))
+
+    def line(self, number: int, end: str, step_dt: float) -> str:
+        mean = {k: v / max(self.steps, 1) for k, v in self.sums.items()}
+        return (f"{number:3d}  {end:5s}  {self.steps * step_dt:7.1f}  {mean['speed']:5.1f}  {mean['edge']:6.1f}  "
+                f"{mean['heading_err']:12.1f}  {mean['slip_err']:9.1f}  {mean['line_err']:10.2f}  "
+                f"{self.max_y:8.1f}  {self.turns:5d}")
 
 
 def main():
     run = yaml.safe_load((args.run / "run.yaml").read_text()) if args.run else {"task": "sideslip", "overrides": {}}
     task = args.task or run["task"]
-    overrides = run["overrides"] | parse_overrides(args.set)
     out = args.run / "trail.png" if args.run else ROOT / f"logs/playground/snowboard/no_policy_{task}_trail.png"
     out.parent.mkdir(parents=True, exist_ok=True)
 
     sim_cfg = sim_utils.SimulationCfg()
     with launch_simulation(sim_cfg, args):
+        from envs import config
         from playground.snowboard.env import SnowboardEnv, SnowboardEnvCfg
         from playground.snowboard.trail import SnowTrail
 
-        # short, repeatable runs: fixed start phase, mid-range speed (unless --set overrides them)
-        defaults = SnowboardEnvCfg(task=task)
-        user = parse_overrides(args.set)
-        lo, hi = overrides.get("speed_cmd", defaults.speed_cmd)
-        if "speed_cmd" not in user:
-            overrides["speed_cmd"] = ((lo + hi) / 2, (lo + hi) / 2)
-        lo, hi = overrides.get("turn_length", defaults.turn_length)
-        wavelength = (lo + hi) / 2
-        if "turn_length" not in user:
-            overrides["turn_length"] = (wavelength, wavelength)
-        if "fixed_phase" not in user:
-            overrides["fixed_phase"] = 0.0  # start on the piste centre, swinging out
-        run_length = args.run_length or (25.0 if task == "sideslip" else 2 * wavelength)
-        overrides["run_length"] = run_length
-        overrides["episode_length_s"] = 60.0  # runs end by distance; this only catches a rider who stops
-        if not args.follow:
-            overrides["viewer"] = free_view_cfg(overrides.get("slope_deg"), args.cam_x or run_length + 10.0)
+        overrides, wavelength, run_length = play_overrides(run["overrides"], SnowboardEnvCfg(task=task))
         raw_env = make_env(SnowboardEnv, SnowboardEnvCfg(task=task), overrides, args.num_envs, sim_cfg,
                            args.suppress_warnings)
         if args.no_policy:
             env, agent = raw_env, None
         else:
             env, agent = load_policy(raw_env, run, args.run, args.checkpoint, cfg_dir=HERE)
-        from envs import config
-
-        board = config.load()["board"]
         if not args.follow:
-            _set_focal_length(raw_env.cfg.viewer.cam_prim_path, args.focal)
+            set_focal_length(raw_env.cfg.viewer.cam_prim_path, args.focal)
+        board = config.load()["board"]
         trail = SnowTrail(board["length"], board["waist_width"], raw_env.q_slope)
 
-        steps = int(args.seconds / raw_env.step_dt)
-        obs, _ = env.reset()
-        best: tuple[float, list] = (-1.0, [])
-        ep = {"t": 0, "e_h": 0.0, "e_s": 0.0, "e_l": 0.0, "speed": 0.0, "edge": 0.0, "y_max": 0.0, "cross": 0, "side": 0}
         print(f"\n[play] task={task}  {'no policy' if args.no_policy else args.run.name}  run {run_length:.0f} m, "
               f"turn length {wavelength:.0f} m, fence ±{raw_env.cfg.fence_half_width:.0f} m")
-        print("[play] run  end    seconds  speed  |edge|°  heading_err°  slip_err°  line_err_m  max|y|_m  turns")
-        n_ep = 0
-        for t in range(steps):
-            with torch.inference_mode():
-                if agent is None:
-                    obs, _, terminated, truncated, _ = env.step(torch.zeros(raw_env.num_envs, 28, device=raw_env.device))
-                else:
-                    actions, outputs = agent.act(obs, None, timestep=t, timesteps=steps)
-                    obs, _, terminated, truncated, _ = env.step(outputs.get("mean_actions", actions))
-            done = bool(terminated.view(-1)[0] or truncated.view(-1)[0])
-            if not done:
-                e_h, e_s, e_l = raw_env.errors()
-                heading = raw_env.path_heading()[0].item()
-                trail.add(raw_env.body_pos(raw_env.board_id)[0], raw_env.slip_angle()[0].item())
-                side = 1 if heading > 0.05 else (-1 if heading < -0.05 else 0)
-                if side and ep["side"] and side != ep["side"]:
-                    ep["cross"] += 1
-                ep["side"] = side or ep["side"]
-                ep["t"] += 1
-                ep["e_h"] += abs(math.degrees(e_h[0].item()))
-                ep["e_s"] += abs(math.degrees(e_s[0].item()))
-                ep["e_l"] += abs(e_l[0].item())
-                ep["y_max"] = max(ep["y_max"], abs(raw_env.position()[0, 1].item()))
-                ep["speed"] += raw_env.body_lin_vel(raw_env.board_id)[0].norm().item()
-                ep["edge"] += abs(math.degrees(raw_env.snow_info["edge_angle"][0].item()))
-            if done or t == steps - 1:
-                n_ep += 1
-                k = max(ep["t"], 1)
-                secs = ep["t"] * raw_env.step_dt
-                if bool(raw_env.out_of_bounds[0]):
-                    end = "fence"
-                elif bool(terminated.view(-1)[0]):
-                    end = "fell"
-                else:
-                    end = "done" if bool(truncated.view(-1)[0]) else "-"
-                print(f"[play] {n_ep:3d}  {end:5s}  {secs:7.1f}  {ep['speed'] / k:5.1f}  {ep['edge'] / k:6.1f}  "
-                      f"{ep['e_h'] / k:12.1f}  {ep['e_s'] / k:9.1f}  {ep['e_l'] / k:10.2f}  {ep['y_max']:8.1f}  "
-                      f"{ep['cross']:5d}")
-                if secs > best[0]:
-                    best = (secs, list(trail.marks))
-                trail.marks.clear()
-                trail.reset()
-                ep = {k_: 0 if isinstance(v, int) else 0.0 for k_, v in ep.items()}
+        print(f"[play] {RunStats.HEADER}")
+        longest_secs, longest_marks = ride(env, raw_env, agent, trail)
 
-        trail.marks = best[1]
-        swing = raw_env.swing[0].item()
-        trail.save_png(out, f"{task}: {best[0]:.1f} s, turn length {wavelength:.0f} m",
-                       line=lambda x: swing * math.sin(2 * math.pi * x / wavelength + raw_env.phase[0].item()),
+        trail.marks = longest_marks
+        swing, phase = raw_env.swing[0].item(), raw_env.phase[0].item()
+        trail.save_png(out, f"{task}: {longest_secs:.1f} s, turn length {wavelength:.0f} m",
+                       line=lambda x: swing * math.sin(2 * math.pi * x / wavelength + phase),
                        fence=raw_env.cfg.fence_half_width, x_end=run_length)
-        print(f"[play] track of the longest episode ({best[0]:.1f} s) -> {out}")
+        print(f"[play] track of the longest episode ({longest_secs:.1f} s) -> {out}")
         env.close()
+
+
+def play_overrides(run_overrides: dict, defaults) -> tuple[dict, float, float]:
+    """Env overrides for short, repeatable runs. Returns (overrides, turn length, run length).
+
+    Training's cfg is the base; --set wins over everything. Unless set, every run starts the same way: mid-range
+    speed and turn length, on the piste centre (phase 0) swinging out.
+    """
+    user = parse_overrides(args.set)
+    overrides = run_overrides | user
+
+    def middle(name: str) -> float:
+        lo, hi = overrides.get(name, getattr(defaults, name))
+        return (lo + hi) / 2
+
+    if "speed_cmd" not in user:
+        overrides["speed_cmd"] = (middle("speed_cmd"),) * 2
+    wavelength = middle("turn_length")
+    if "turn_length" not in user:
+        overrides["turn_length"] = (wavelength,) * 2
+    if "fixed_phase" not in user:
+        overrides["fixed_phase"] = 0.0
+
+    run_length = args.run_length or (25.0 if defaults.task == "sideslip" else 2 * wavelength)
+    overrides["run_length"] = run_length
+    overrides["episode_length_s"] = 60.0  # runs end by distance; this only catches a rider who stops
+    if not args.follow:
+        overrides["viewer"] = free_view_cfg(overrides.get("slope_deg"), args.cam_x or run_length + 10.0)
+    return overrides, wavelength, run_length
+
+
+def ride(env, raw_env, agent, trail) -> tuple[float, list]:
+    """Play for --seconds, one printed line per run. Returns the longest run's (seconds, trail marks)."""
+    steps = int(args.seconds / raw_env.step_dt)
+    obs, _ = env.reset()
+    stats, runs = RunStats(), 0
+    longest = (-1.0, [])
+    for t in range(steps):
+        with torch.inference_mode():
+            if agent is None:
+                action = torch.zeros(raw_env.num_envs, raw_env.cfg.action_space, device=raw_env.device)
+            else:
+                action, outputs = agent.act(obs, None, timestep=t, timesteps=steps)
+                action = outputs.get("mean_actions", action)
+            obs, _, terminated, truncated, _ = env.step(action)
+        terminated, truncated = bool(terminated.view(-1)[0]), bool(truncated.view(-1)[0])
+        done = terminated or truncated
+
+        if not done:  # on a done step the env has already reset to the start
+            stats.add(raw_env)
+            trail.add(raw_env.body_pos(raw_env.board_id)[0], raw_env.slip_angle()[0].item())
+        if done or t == steps - 1:
+            runs += 1
+            end = "fence" if raw_env.out_of_bounds[0] else "fell" if terminated else "done" if truncated else "-"
+            print(f"[play] {stats.line(runs, end, raw_env.step_dt)}")
+            seconds = stats.steps * raw_env.step_dt
+            if seconds > longest[0]:
+                longest = (seconds, list(trail.marks))
+            trail.marks.clear()
+            trail.reset()
+            stats = RunStats()
+    return longest
 
 
 def free_view_cfg(slope_deg: float | None, cam_x: float):
@@ -173,7 +200,7 @@ def free_view_cfg(slope_deg: float | None, cam_x: float):
     return ViewerCfg(eye=slope_to_world(a, cam_x, 3.0, 0.6), lookat=slope_to_world(a, 0.0, 0.0, 1.0), origin_type="env")
 
 
-def _set_focal_length(cam_prim_path: str, focal_mm: float):
+def set_focal_length(cam_prim_path: str, focal_mm: float):
     """Longer lens than Kit's ~18 mm default: the rider fills more of the frame from the bottom of the run."""
     from isaaclab.sim.utils.stage import get_current_stage
 
