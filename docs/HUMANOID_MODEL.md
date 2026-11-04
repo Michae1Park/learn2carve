@@ -84,7 +84,7 @@ Each change is a flag on `CarveEnvCfg`; the defaults are the baseline above.
 
 | Flag | Change |
 |---|---|
-| `thoracic=true` | **Second spine joint.** The torso splits into a lumbar segment (4.4 kg) and a chest (12.6 kg) joined by a 2-DoF thoracic joint, `thorax:0` roll (±30°) and `thorax:1` pitch (−30…45°). Neck and shoulders move to the chest. **30 DoF** |
+| `thoracic=true` | **Second spine joint.** The torso splits into a lumbar segment (4.4 kg) and a chest (12.6 kg) joined by a 2-DoF thoracic joint, `thorax:0` roll (±40°) and `thorax:1` pitch (−40…60°). Neck and shoulders move to the chest. **30 DoF** |
 | `compliant_drives=true` | **Per-group stiffness** instead of one uniform, very stiff drive (damping follows, keeping each joint's damping ratio) |
 | `neck_stiffness_scale=0.5` | Softer neck: the head moves instead of being held rigid |
 | `spine_damping_scale=2` | Extra damping on abdomen + thorax: no torso jerks |
@@ -102,7 +102,7 @@ pelvis ─abdomen (3)─ lumbar ─thorax (2)─ chest ─┬─ neck (3) ─ he
 
 | Group | Hip | Knee | Ankle | Abdomen | Thorax | Shoulder | Elbow | Neck |
 |---|---|---|---|---|---|---|---|---|
-| Scale | 1.0 | 1.0 | 0.7 | 0.5 | 0.5 | 0.3 | 0.3 | 0.4 (× 0.5 neck scale) |
+| Scale | 1.0 | 1.0 | 0.7 | 0.35 | 0.35 | 0.3 | 0.3 | 0.4 (× 0.5 neck scale) |
 
 Legs carry the body and stay stiff; the spine, arms and neck give, as a human's do.
 

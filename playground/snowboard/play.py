@@ -155,6 +155,7 @@ def play_overrides(run_overrides: dict, defaults) -> tuple[dict, float]:
         overrides["speed_cmd"] = (middle("speed_cmd"),) * 2
     if "start_heading_deg" not in user:
         overrides["start_heading_deg"] = 0.0
+    overrides["guide_steps"] = 0  # the guide S is a training aid only: play rides without it
 
     run_length = args.run_length or (25.0 if defaults.task == "sideslip" else 100.0)
     overrides["run_length"] = run_length

@@ -25,8 +25,24 @@ its rhythm) is *learned*: it comes out of the physics of speed, slope, edge angl
 | **Linked turn** | $\psi$ crosses the fall line after swinging $\lvert\psi\rvert \ge 15°$ to one side |
 
 **Why turns emerge.** Training runs on a **15° slope**. Going straight down it runs to ~24 m/s ([snow model §4](SNOW_MODEL.md)). Commanded
-5–9 m/s, the rider must spend part of each turn heading across the hill, where gravity pulls less. How far across,
+11–15 m/s, the rider must spend part of each turn heading across the hill, where gravity pulls less. How far across,
 and how long each turn is, depends on speed, slope and how hard the edge can hold: the policy finds it.
+
+**A guide to start from.** Learning to turn from nothing is slow, so the turn tasks begin with a guide S that the
+policy traces, then fades out:
+
+$$y_{\text{guide}}(x) = Y\sin\!\left(\frac{2\pi x}{\lambda} + \varphi\right),\quad Y = \frac{\lambda\tan A}{2\pi} \qquad A \sim U(35°, 50°),\ \varphi \in \{0, \pi\}$$
+
+$\lambda$ is drawn per episode so the S stays carvable: tightest bend $\lambda / (2\pi\tan A) \ge 9$ m (sidecut 5–7 m),
+swing $Y \le 15$ m (fences at ±20 m). The rider starts on the guide, heading along it.
+
+| | Start of training | After 6000 steps (half of training) |
+|---|---|---|
+| Guide reward $w_{\text{guide}}\,r_{\text{track}}(\psi - \psi_{\text{guide}})$ | Weight 2.0 | **0**: faded out linearly |
+| Guide in the observation | Heading error to the guide | **Zeros** (faded the same way) |
+| Turn length, width, rhythm, how to press | Shaped by the guide | **The policy's own** |
+
+Each episode draws its own S, so no single shape is learned. Play and evaluation always run with the guide off.
 
 ## 2. MDP
 
@@ -35,15 +51,15 @@ and how long each turn is, depends on speed, slope and how hard the edge can hol
 | **Observation** | Humanoid: joint positions and velocities, torso height, orientation, velocities, hands and feet relative to the root (AMP layout) |
 | | Board: $\theta$, $v_\parallel$, $v_\perp$, yaw rate, $N / mg$, grip usage $\lvert F_\perp\rvert / \mu N$ (+ two-half board: nose and tail edge angles, load on the nose, camber flattened) |
 | | Last action |
-| | Task (13): speed and command, $\psi$, $\beta$, board yaw, position between the fences, turn side, swing so far, time since the last turn, $\beta^*$ |
+| | Task (16): speed and command, $\psi$, $\beta$, board yaw, position between the fences, turn side, swing so far, time since the last turn, $\beta^*$, guide heading error and fade |
 | **Action** | Joint targets around the stance (see [humanoid model §5](HUMANOID_MODEL.md#5-actions--joint-targets)), 30 Hz |
 | **Done** | Pelvis below 0.45 m (**fell**), board past a fence at ±20 m (**fence**), or 12 s (**time-out**) |
 | **Start** | Side slip: at rest on the heel edge, CoM above it. Turns: piste centre, heading within ±20° of the fall line, at the commanded speed |
 
 | Model | DoF (actuated) | Observation | Action |
 |---|---|---|---|
-| Baseline rider, rigid board | 28 | 128 | 28 |
-| New rider, two-half board | 30 (+2 passive board) | 142 | 30 |
+| Baseline rider, rigid board | 28 | 131 | 28 |
+| New rider, two-half board | 30 (+2 passive board) | 145 | 30 |
 
 ## 3. Reward
 
@@ -55,15 +71,29 @@ $$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{turn}}\,\mathbb{1}[\text{turn com
 |---|---|---|---|
 | Alive | 1 while not fallen | 1.0 | |
 | Upright | $\max(0,\ \hat z_{\text{torso}} \cdot \hat n)$ | 1.0 | |
-| **Speed** | $r_{\text{track}}(\lVert v\rVert - v^*)$, $v^* \sim U(5, 9)$ m/s (side slip: 0.5–2.5) | 2.0 | 2 m/s |
+| **Speed** | $r_{\text{track}}(\lVert v\rVert - v^*)$, $v^* \sim U(11, 15)$ m/s (side slip: 0.5–2.5) | 2.0 | 5 m/s |
+| **Over-speed** | $\operatorname{clip}\big((\lVert v\rVert - v^*)/5,\ 0,\ 1\big)$ | −1.0 | |
+| **Speed cap** | $\operatorname{clip}\big((\lVert v\rVert - 15)/2,\ 0,\ 1\big)$ | −1.0 | |
+| **Fall** | Once, when the episode ends in a fall or past a fence | −10 | |
 | Slip | $r_{\text{track}}(\lvert\beta\rvert - \beta^*)$ (side slip: $\beta - \beta^*$) | 2.0 | 15° |
 | Heading | Side slip only: $r_{\text{track}}(\psi)$ | 2.0 | 30° |
 | **Turn** | +1 per linked turn (turn tasks) | 1.0 | |
+| Guide | $r_{\text{track}}(\psi - \psi_{\text{guide}})$ × fade (turn tasks, first half of training) | 2.0 → 0 | 30° |
+| Guide line | $r_{\text{track}}(y - y_{\text{guide}})$ × fade | 1.0 → 0 | 3 m |
 | Pose | $\lVert q - q^{\text{stance}} \rVert^2$ | −0.1 | |
 | Action rate | $\lVert a_t - a_{t-1} \rVert^2$ | −0.01 | |
 | Torso wobble | $\lVert \omega_{\text{torso}} \rVert^2$ | −0.05 | |
 
 **What's not in the reward:** turn length, turn width, where on the piste to turn. Only the fences bound the piste.
+
+**Lessons from the reward (each one cost a training run):**
+
+| Try | What happened | Fix |
+|---|---|---|
+| Speed Gaussian only, $\sigma$ = 2 m/s | Rode straight at 15 m/s (command 5–9): at 8 m/s over, $e^{-16} \approx 0$, no gradient toward slowing | $\sigma$ = 5 m/s + an over-speed term |
+| Over-speed unbounded, $-0.5\,(v - v^*)$ | The rider speeds up through each episode, so late seconds cost more than staying up earns: it learned to **fall at ~5 s** | Penalties bounded (a second alive is worth ≥ 0) + a −10 fall penalty |
+| Guide S of 25–60 m at 30–55° | Asked for 2.8 m bends, tighter than any carve: riders threw themselves at it | Guide ranges kept carvable |
+| Speed command 5–9 m/s on 15° | Rode straight at the 15 m/s cap, ignored the guide: a clean carve on any S that fits between the fences settles at ~19–21 m/s, so 5–9 was out of reach | Command 11–15 m/s; rider starts on the guide; guide line term |
 
 ## 4. PPO
 

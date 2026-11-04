@@ -29,7 +29,7 @@ from envs.carve_env import CarveEnv, CarveEnvCfg, base_obs_size, num_dof
 from envs.mountain import FENCE_HALF_WIDTH
 
 TASKS = ("sideslip", "skid", "carve")
-TASK_OBS = 13  # see _task_obs
+TASK_OBS = 16  # see _task_obs
 
 
 @configclass
@@ -46,26 +46,47 @@ class SnowboardEnvCfg(CarveEnvCfg):
     skid_slip_deg = 20.0  # skid: slip angle to hold
     start_heading_deg = 20.0  # turn tasks: start heading sampled in ± this from the fall line
     fence_half_width = FENCE_HALF_WIDTH  # m; crossing it ends the episode
+
+    # guide S line (turn tasks): something to trace while learning to turn, faded out over guide_steps. Each episode
+    # draws its own S, so no one shape is learned; once the guide is gone, turn length and shape are the policy's.
+    guide_steps: int = 6000  # policy steps (per env) over which the guide's reward and observation fade to 0; 0 = off
+    # Each episode: crossing angle A, then a turn length λ that keeps the S carvable: tightest bend
+    # λ / (2π tan A) ≥ guide_min_radius (sidecut 5–7 m; 2.8 m bends made riders throw themselves), swing
+    # λ tan A / 2π ≤ guide_max_swing (fences at ±20 m).
+    guide_amp_deg = (35.0, 50.0)  # angle at which the guide crosses the fall line
+    guide_min_radius = 9.0  # m
+    guide_max_swing = 15.0  # m
+    guide_lookahead = 6.0  # m, pure pursuit back onto the guide
     run_length: float | None = None  # m; end the episode (as a time-out) this far down (play.py sets it)
 
     # reward weights (each term is multiplied by step_dt, except turn: a bonus per completed turn)
     rew_alive = 1.0
     rew_upright = 1.0  # torso up · snow normal
     rew_speed = 2.0  # exp(-((|v| - v_cmd) / σ_v)²): the reason to turn
+    # Penalties are bounded so a second alive is never worth less than 0 (alive + upright = +2/s): unbounded, the
+    # rider sped up through each episode and learned to fall at ~5 s to stop paying.
+    rew_overspeed = -1.0  # × clip((|v| - v_cmd) / 5, 0, 1): a gradient toward slowing (= turning) at any speed
+    rew_speed_cap = -1.0  # × clip((|v| - speed_cap) / 2, 0, 1)
+    speed_cap = 15.0  # m/s
+    rew_fall = -10.0  # once, when the episode ends in a fall or past a fence
     rew_slip = 2.0  # exp(-(slip error / σ_slip)²)
     rew_heading = 2.0  # sideslip only: exp(-(heading / σ)²), straight down the fall line
     rew_turn = 1.0  # per completed turn (turn tasks)
+    rew_guide = 2.0  # exp(-(heading - guide heading)² / σ²) × fade (turn tasks, start of training)
+    rew_guide_line = 1.0  # exp(-(distance to the guide / 3 m)²) × fade
     rew_pose = -0.1  # joint distance from the snowboard stance
     rew_action_rate = -0.01
     rew_torso_ang_vel = -0.05  # wobbling
     sigma_slip_deg = 15.0
-    sigma_heading_deg = 30.0
-    sigma_speed = 2.0  # m/s
+    sigma_heading_deg = 30.0  # also the guide's tolerance
+    sigma_speed = 5.0  # m/s; 2 gave no gradient: at 15 m/s vs 7 commanded, exp(-16) ≈ 0, so nothing taught it to turn
 
     def __post_init__(self):
         super().__post_init__()
         if self.task != "sideslip":
-            self.speed_cmd = (5.0, 9.0)
+            # what a carved S on 15° can hold inside the fences: a clean carve settles at ~19-21 m/s on any S that
+            # fits, so 5-9 m/s (the first try) was unreachable without skidding
+            self.speed_cmd = (11.0, 15.0)
 
 
 class SnowboardEnv(CarveEnv):
@@ -84,6 +105,9 @@ class SnowboardEnv(CarveEnv):
         self.last_turns = torch.zeros(n, device=dev)  # turns of each env's previous episode (read after a reset)
         self.since_turn = torch.zeros(n, device=dev)  # s since the last completed turn (or the start)
         self.turn_done = torch.zeros(n, dtype=torch.bool, device=dev)  # a turn completed this step
+        self.guide_k = torch.zeros(n, device=dev)  # 2π / λ of this episode's guide [1/m]
+        self.guide_y = torch.zeros(n, device=dev)  # its swing Y [m]
+        self.guide_phase = torch.zeros(n, device=dev)
         self.prev_actions = torch.zeros(n, num_dof(cfg), device=dev)
         self.out_of_bounds = torch.zeros(n, dtype=torch.bool, device=dev)
         self.episode_sums: dict[str, torch.Tensor] = {}  # per-episode totals for TensorBoard
@@ -114,6 +138,19 @@ class SnowboardEnv(CarveEnv):
         forward = torch.tensor([1.0, 0.0, 0.0], device=self.device).expand(self.num_envs, 3)
         nose = quat_apply(self.body_quat(self.board_id), forward)
         return torch.atan2(nose[:, 1], nose[:, 0])
+
+    def guide_fade(self) -> float:
+        """1 at the start of training, 0 after guide_steps (and always 0 for side slip or guide_steps = 0)."""
+        if self.cfg.task == "sideslip" or self.cfg.guide_steps <= 0:
+            return 0.0
+        return max(0.0, 1.0 - self.common_step_counter / self.cfg.guide_steps)
+
+    def guide_heading(self) -> torch.Tensor:
+        """Heading toward the guide S: its direction at the board, pulled back onto it (pure pursuit)."""
+        x, y = self.position().unbind(-1)
+        arg = self.guide_k * x + self.guide_phase
+        y_ref = self.guide_y * arg.sin()
+        return torch.atan(self.guide_y * self.guide_k * arg.cos()) - torch.atan((y - y_ref) / self.cfg.guide_lookahead)
 
     def slip_target(self) -> torch.Tensor:
         target = {"sideslip": -math.pi / 2, "skid": math.radians(self.cfg.skid_slip_deg), "carve": 0.0}[self.cfg.task]
@@ -148,10 +185,12 @@ class SnowboardEnv(CarveEnv):
     def _task_obs(self) -> torch.Tensor:
         psi, beta, yaw = self.path_heading(), self.slip_angle(), self.board_yaw()
         y = self.position()[:, 1]
+        fade = self.guide_fade()
+        e_guide = _wrap(self.guide_heading() - psi)  # faded with the reward: zeros once the guide is gone
         return torch.stack(
             [self.board_speed(), self.v_cmd, psi.sin(), psi.cos(), beta.sin(), beta.cos(), yaw.sin(), yaw.cos(),
              y / self.cfg.fence_half_width, self.turn_side, self.turn_swing, self.since_turn.clamp(max=10.0) / 5.0,
-             self.slip_target()],
+             self.slip_target(), fade * e_guide.sin(), fade * (1 - e_guide.cos()), torch.full_like(psi, fade)],
             dim=-1,
         )
 
@@ -173,6 +212,8 @@ class SnowboardEnv(CarveEnv):
             "alive": (~self.reset_terminated).float(),
             "upright": (torso_up * self.up).sum(-1).clamp(min=0.0),
             "speed": torch.exp(-((speed - self.v_cmd) / cfg.sigma_speed).square()),
+            "overspeed": ((speed - self.v_cmd) / 5.0).clamp(0.0, 1.0),
+            "speed_cap": ((speed - cfg.speed_cap) / 2.0).clamp(0.0, 1.0),
             "slip": torch.exp(-(e_slip / math.radians(cfg.sigma_slip_deg)).square()),
             "heading": torch.zeros_like(speed) if turns
             else torch.exp(-(psi / math.radians(cfg.sigma_heading_deg)).square()),
@@ -185,6 +226,19 @@ class SnowboardEnv(CarveEnv):
             r = getattr(cfg, f"rew_{name}") * value * self.step_dt
             reward += r
             self._track(f"rew_{name}", r)
+        r = cfg.rew_fall * self.reset_terminated.float()  # a fall or a fence, not a time-out
+        reward += r
+        self._track("rew_fall", r)
+        if turns:  # the guide, faded over training
+            e_guide = _wrap(psi - self.guide_heading())
+            x, y = self.position().unbind(-1)
+            e_line = y - self.guide_y * (self.guide_k * x + self.guide_phase).sin()
+            r = self.guide_fade() * (cfg.rew_guide * torch.exp(-(e_guide / math.radians(cfg.sigma_heading_deg)).square())
+                                     + cfg.rew_guide_line * torch.exp(-(e_line / 3.0).square()))
+            reward += r * self.step_dt
+            self._track("rew_guide", r * self.step_dt)
+            self._track("err_guide_m", e_line.abs())
+            self._track("err_guide_deg", e_guide.abs().rad2deg())
         if turns:  # a bonus per completed turn, not a rate
             r = cfg.rew_turn * self.turn_done.float()
             reward += r
@@ -212,6 +266,15 @@ class SnowboardEnv(CarveEnv):
         self.v_cmd[env_ids] = lo + (hi - lo) * torch.rand(len(env_ids), device=self.device)
         for buf in (self.turn_side, self.turn_swing, self.turn_count, self.since_turn):
             buf[env_ids] = 0.0
+        m = len(env_ids)
+        rand = lambda lo_hi: lo_hi[0] + (lo_hi[1] - lo_hi[0]) * torch.rand(m, device=self.device)
+        tan_a = torch.tan(torch.deg2rad(rand(self.cfg.guide_amp_deg)))
+        shortest = 2 * math.pi * self.cfg.guide_min_radius * tan_a
+        longest = torch.minimum(1.3 * shortest, 2 * math.pi * self.cfg.guide_max_swing / tan_a)
+        wavelength = shortest + (longest - shortest).clamp(min=0.0) * torch.rand(m, device=self.device)
+        self.guide_k[env_ids] = 2 * math.pi / wavelength
+        self.guide_y[env_ids] = wavelength * tan_a / (2 * math.pi)
+        self.guide_phase[env_ids] = math.pi * (torch.rand(m, device=self.device) < 0.5).float()  # swing left or right
         super()._reset_idx(env_ids)
         index_fill_(self.actions, env_ids, 0.0)
         index_fill_(self.prev_actions, env_ids, 0.0)
@@ -249,8 +312,12 @@ class SnowboardEnv(CarveEnv):
             yaw = math.pi / 2 + jitter
             edge = torch.full_like(yaw, -(math.radians(self.slope_deg) + lean))
             return yaw, edge, torch.zeros(n, 3, device=self.device), zeros
-        # piste centre, nose first, heading within ± start_heading_deg of the fall line, at the commanded speed
-        heading = math.radians(self.cfg.start_heading_deg) * (2 * torch.rand(n, device=self.device) - 1)
+        # piste centre, nose first, at the commanded speed: along the guide while it's on, else within
+        # ± start_heading_deg of the fall line
+        if self.guide_fade() > 0:
+            heading = torch.atan(self.guide_y[env_ids] * self.guide_k[env_ids] * self.guide_phase[env_ids].cos())
+        else:
+            heading = math.radians(self.cfg.start_heading_deg) * (2 * torch.rand(n, device=self.device) - 1)
         direction = torch.stack([heading.cos(), heading.sin(), zeros], dim=-1)
         velocity = self.v_cmd[env_ids].unsqueeze(-1) * direction
         return heading + jitter, zeros, velocity, zeros

@@ -262,7 +262,7 @@ def _split_torso(stage, root: str, cfg: RiderSpawnCfg) -> None:
 # Legs carry the body and stay stiff; the spine, arms and neck give, as a human's do. Stock = 1.0 everywhere.
 COMPLIANT = {
     "hip": 1.0, "knee": 1.0, "ankle": 0.7,
-    "abdomen": 0.5, "thorax": 0.5,
+    "abdomen": 0.35, "thorax": 0.35,  # a supple spine: it curls and twists under load
     "shoulder": 0.3, "elbow": 0.3,
     "neck": 0.4,
 }
@@ -345,8 +345,8 @@ class RiderSpawnCfg(UsdFileCfg):
     torsion_stiffness: float = 5.0  # N·m per degree of twist between nose and tail halves
     effective_edge: float = 1.14  # m
     thoracic: bool = False  # split the torso: + 2-DoF thoracic joint (roll, pitch) between lumbar and chest
-    thorax_roll_deg: tuple[float, float] = (-30.0, 30.0)
-    thorax_pitch_deg: tuple[float, float] = (-30.0, 45.0)
+    thorax_roll_deg: tuple[float, float] = (-40.0, 40.0)
+    thorax_pitch_deg: tuple[float, float] = (-40.0, 60.0)
     thorax_stiffness: float = 400.0  # USD units (per degree), like the abdomen's 600
     thorax_armature: float = 0.025  # kg·m², rotor inertia added to the thorax DoFs (the USD uses 0.025)
     compliant_drives: bool = False  # per-group stiffness (COMPLIANT) instead of the stock uniform, very stiff drives

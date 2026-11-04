@@ -48,7 +48,8 @@ def evaluate(run_dir: Path, sim_cfg) -> dict:
     from playground.snowboard.env import SnowboardEnv, SnowboardEnvCfg
 
     run = yaml.safe_load((run_dir / "run.yaml").read_text())
-    raw = make_env(SnowboardEnv, SnowboardEnvCfg(task=run["task"]), run["overrides"], args.num_envs, sim_cfg,
+    overrides = run["overrides"] | {"guide_steps": 0}  # evaluate without the training guide
+    raw = make_env(SnowboardEnv, SnowboardEnvCfg(task=run["task"]), overrides, args.num_envs, sim_cfg,
                    args.suppress_warnings)
     env, agent = load_policy(raw, run, run_dir, args.checkpoint, cfg_dir=HERE)
     n, dev = raw.num_envs, raw.device
