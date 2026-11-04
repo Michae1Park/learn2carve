@@ -355,7 +355,7 @@ class RiderSpawnCfg(UsdFileCfg):
 
 
 def rider_cfg(stance: dict | None = None, world_pins: dict | None = None, solver_iterations: tuple[int, int] = (32, 4),
-              **options) -> ArticulationCfg:
+              binding_angles: tuple[float, float] | None = None, **options) -> ArticulationCfg:
     """ArticulationCfg for the rider. ``stance`` (from envs/assets/stance.yaml) sets the default joint positions.
 
     solver_iterations: PhysX (position, velocity) iterations. options: RiderSpawnCfg fields (thoracic, neck / spine
@@ -378,7 +378,7 @@ def rider_cfg(stance: dict | None = None, world_pins: dict | None = None, solver
         activate_contact_sensors=True,
         board_size=(board["length"], board["waist_width"], board["thickness"]),
         board_mass=board["mass"],
-        bindings=binding_frames(board, rider),
+        bindings=binding_frames(board, rider | ({"binding_angles_deg": list(binding_angles)} if binding_angles else {})),
         world_pins=world_pins or {},
         **options,
     )
