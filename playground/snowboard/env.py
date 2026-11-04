@@ -417,7 +417,8 @@ class SnowboardEnv(CarveEnv):
         if cfg.edge_cmd:  # dense: track the commanded edge, heel -> base -> toe
             theta = self.snow_info["edge_angle"] if self.snow_info else zeros
             e_cmd = theta - self.edge_command()
-            r = cfg.rew_edge_cmd * torch.exp(-(e_cmd / math.radians(cfg.edge_cmd_sigma_deg)).square()) * self.step_dt
+            # × clean: only while carving, not sliding sideways (a flat side slip held the speed and hit the fence)
+            r = cfg.rew_edge_cmd * torch.exp(-(e_cmd / math.radians(cfg.edge_cmd_sigma_deg)).square()) * clean * self.step_dt
             reward += r
             self._track("rew_edge_cmd", r)
             self._track("err_edge_cmd_deg", e_cmd.abs().rad2deg())
