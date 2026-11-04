@@ -101,13 +101,12 @@ def main():
     sim_cfg = sim_utils.SimulationCfg()
     with launch_simulation(sim_cfg, args):  # one env per process: Isaac Lab builds one scene per stage
         r = evaluate(args.run, sim_cfg)
-        results = [r]
         print("[eval] " + "  ".join([r["run"]] + [f"{k} {r[k]:.3f}" for k in METRICS]), flush=True)
-    if args.out:
-        args.out.parent.mkdir(parents=True, exist_ok=True)
-        old = yaml.safe_load(args.out.read_text()) if args.out.exists() else []
-        args.out.write_text(yaml.safe_dump(old + results, sort_keys=False))
-        print(f"[eval] -> {args.out}")
+        if args.out:  # inside the context: Isaac Sim's shutdown ends the process when it closes
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            old = yaml.safe_load(args.out.read_text()) if args.out.exists() else []
+            args.out.write_text(yaml.safe_dump(old + [r], sort_keys=False))
+            print(f"[eval] -> {args.out}", flush=True)
 
 
 if __name__ == "__main__":

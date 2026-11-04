@@ -22,10 +22,10 @@ its rhythm) is *learned*: it comes out of the physics of speed, slope, edge angl
 |---|---|
 | Path heading | $\psi = \operatorname{atan2}(v_y, v_x)$: travel direction, 0 = straight down the fall line |
 | Slip angle | $\beta = \operatorname{atan2}(v_\perp, v_\parallel)$: angle between the board's axis and its travel |
-| **Linked turn** | $\psi$ crosses the fall line after swinging $\lvert\psi\rvert \ge 15°$ to one side |
+| **Linked turn** | $\psi$ crosses the fall line after swinging $\lvert\psi\rvert \ge 45°$ to one side: a real turn, across the hill |
 
 **Why turns emerge.** Training runs on a **15° slope**. Going straight down it runs to ~24 m/s ([snow model §4](SNOW_MODEL.md)). Commanded
-11–15 m/s, the rider must spend part of each turn heading across the hill, where gravity pulls less. How far across,
+8–11 m/s and capped at 12 m/s, the rider must spend part of each turn heading across the hill, where gravity pulls less. How far across,
 and how long each turn is, depends on speed, slope and how hard the edge can hold: the policy finds it.
 
 **A guide to start from.** Learning to turn from nothing is slow, so the turn tasks begin with a guide S that the
@@ -34,7 +34,7 @@ policy traces, then fades out:
 $$y_{\text{guide}}(x) = Y\sin\!\left(\frac{2\pi x}{\lambda} + \varphi\right),\quad Y = \frac{\lambda\tan A}{2\pi} \qquad A \sim U(35°, 50°),\ \varphi \in \{0, \pi\}$$
 
 $\lambda$ is drawn per episode so the S stays carvable: tightest bend $\lambda / (2\pi\tan A) \ge 9$ m (sidecut 5–7 m),
-swing $Y \le 15$ m (fences at ±20 m). The rider starts on the guide, heading along it.
+swing $Y \le 15$ m (fences at ±20 m). The rider starts on the guide, heading along it, at 4–6 m/s.
 
 | | Start of training | After 6000 steps (half of training) |
 |---|---|---|
@@ -71,14 +71,15 @@ $$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{turn}}\,\mathbb{1}[\text{turn com
 |---|---|---|---|
 | Alive | 1 while not fallen | 1.0 | |
 | Upright | $\max(0,\ \hat z_{\text{torso}} \cdot \hat n)$ | 1.0 | |
-| **Speed** | $r_{\text{track}}(\lVert v\rVert - v^*)$, $v^* \sim U(11, 15)$ m/s (side slip: 0.5–2.5) | 2.0 | 5 m/s |
+| **Speed** | $r_{\text{track}}(\lVert v\rVert - v^*)$, $v^* \sim U(8, 11)$ m/s (side slip: 0.5–2.5) | 2.0 | 5 m/s |
 | **Over-speed** | $\operatorname{clip}\big((\lVert v\rVert - v^*)/5,\ 0,\ 1\big)$ | −1.0 | |
-| **Speed cap** | $\operatorname{clip}\big((\lVert v\rVert - 15)/2,\ 0,\ 1\big)$ | −1.0 | |
+| **Speed cap** | $\operatorname{clip}\big((\lVert v\rVert - 12)/2,\ 0,\ 1\big)$: forces turning | −3.0 | |
 | **Fall** | Once, when the episode ends in a fall or past a fence | −10 | |
+| **Edge** | Turn tasks: $\operatorname{clip}(\lvert\theta\rvert / \theta^*,\ 0,\ 1)$, $\theta^*$ = **40° carve**, 20° skid. Full reward from $\theta^*$ up, no penalty beyond: carving uses **40° and more** (up to ~85°) | 1.0 | |
 | Slip | $r_{\text{track}}(\lvert\beta\rvert - \beta^*)$ (side slip: $\beta - \beta^*$) | 2.0 | 15° |
 | Heading | Side slip only: $r_{\text{track}}(\psi)$ | 2.0 | 30° |
 | **Turn** | +1 per linked turn (turn tasks) | 1.0 | |
-| Guide | $r_{\text{track}}(\psi - \psi_{\text{guide}})$ × fade (turn tasks, first half of training) | 2.0 → 0 | 30° |
+| Guide | $r_{\text{track}}(\psi - \psi_{\text{guide}})$ × fade (turn tasks, first half of training) | 4.0 → 0 | 30° |
 | Guide line | $r_{\text{track}}(y - y_{\text{guide}})$ × fade | 1.0 → 0 | 3 m |
 | Pose | $\lVert q - q^{\text{stance}} \rVert^2$ | −0.1 | |
 | Action rate | $\lVert a_t - a_{t-1} \rVert^2$ | −0.01 | |
@@ -93,7 +94,10 @@ $$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{turn}}\,\mathbb{1}[\text{turn com
 | Speed Gaussian only, $\sigma$ = 2 m/s | Rode straight at 15 m/s (command 5–9): at 8 m/s over, $e^{-16} \approx 0$, no gradient toward slowing | $\sigma$ = 5 m/s + an over-speed term |
 | Over-speed unbounded, $-0.5\,(v - v^*)$ | The rider speeds up through each episode, so late seconds cost more than staying up earns: it learned to **fall at ~5 s** | Penalties bounded (a second alive is worth ≥ 0) + a −10 fall penalty |
 | Guide S of 25–60 m at 30–55° | Asked for 2.8 m bends, tighter than any carve: riders threw themselves at it | Guide ranges kept carvable |
-| Speed command 5–9 m/s on 15° | Rode straight at the 15 m/s cap, ignored the guide: a clean carve on any S that fits between the fences settles at ~19–21 m/s, so 5–9 was out of reach | Command 11–15 m/s; rider starts on the guide; guide line term |
+| Speed command 5–9 m/s on 15°, mild cap | Rode straight at the 15 m/s cap, ignored the guide: the cap cost at most 1/s, less than staying up earned | Rider starts on the guide; guide line term |
+| Start at 11–15 m/s on the guide | 77–98% of episodes ended at a fence in ~2.5 s: 8–10 m/s sideways, no time to learn the first turn | Start at 4–6 m/s; **cap 12 m/s at −3/s**, fall −30 |
+| Cap 12 m/s, fall −30 | Learned to **ride flat**: edge angle 18° → 4°, straight at 13 m/s taking the cap penalty. No edge, no sidecut turn; −30 made trying to edge too costly | **Edge reward**; fall −10; guide weight 4 |
+| A turn = a 15° swing | Learned to turn (edge 17–19°, 0 falls) but **gamed the turn bonus**: ±15° wiggles every 0.7 s (14–16 "turns" per 10 s), still 5 m/s over the command | A turn needs a **45°** swing |
 
 ## 4. PPO
 
