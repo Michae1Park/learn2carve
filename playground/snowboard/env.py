@@ -75,6 +75,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_speed_cap = -10.0  # × clip((|v| - speed_cap) / 2, 0, 1): over the cap is clearly worse than turning
     speed_cap = 12.0  # m/s; a clean carve on 15° settles at ~19-21 m/s, so the cap forces turns finished across the hill
     # carve: edged × turning × clean × low = clip(|θ|/edge_target) · clip(|ψ̇_board|/0.5) · exp(-(β/σ)²) · (0.5 + 0.5 low)
+    carve_start_toe_frac = 0.5  # carve_start: share of episodes that start on the toe edge (toe -> heel is the hard switch)
     lying_deg = 80.0  # torso tilt from vertical that counts as lying (a deep toe-side carve bows it 55-70°)
     fall_height = 0.15  # pelvis above the snow [m]: at the apex of a deep carve the hips are ~0.2 m from it (was 0.45)
     rew_carve = 2.0
@@ -680,7 +681,7 @@ class SnowboardEnv(CarveEnv):
         edge = zeros
         if self.cfg.carve_start:  # balanced on edge: the rigid stance leans with the board, so lean = edge
             g_n = 9.81 * math.cos(math.radians(self.slope_deg))
-            side = torch.where(torch.rand(n, device=self.device) < 0.5, -1.0, 1.0)
+            side = torch.where(torch.rand(n, device=self.device) < self.cfg.carve_start_toe_frac, 1.0, -1.0)  # +1 toe
             edge = side * torch.asin((speed.square() / (g_n * 7.6)).clamp(max=0.9))
             self.cmd_hold[env_ids] = edge
             if not self.cfg.edge_cmd_hold:  # stage 2: the timed command starts at the peak of this side, then flips
