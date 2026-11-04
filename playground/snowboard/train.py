@@ -2,6 +2,7 @@
 
     scripts/py playground/snowboard/train.py --task sideslip
     scripts/py playground/snowboard/train.py --task skid --set slope_deg=10
+    scripts/py playground/snowboard/train.py --task carve --init_from logs/playground/snowboard/<run>   # warm start
 
 Runs land in logs/playground/snowboard/<time>_ppo_<task>/ (TensorBoard events + checkpoints/).
 --set overrides any SnowboardEnvCfg field (reward weights, targets, slope_deg, ...); see env.py.
@@ -41,7 +42,7 @@ def main():
 
         env = make_env(SnowboardEnv, SnowboardEnvCfg(task=args.task), run["overrides"], run["num_envs"], sim_cfg,
                        args.suppress_warnings)
-        train(env, agent_cfg, run_dir, run, args.seed)
+        train(env, agent_cfg, run_dir, run, args.seed, args.init_from)
 
 
 if __name__ == "__main__":

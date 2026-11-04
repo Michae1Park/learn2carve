@@ -23,6 +23,9 @@ def add_train_args(parser, default_timesteps: int | None = None):
                         help="env steps per env; default: " + (str(default_timesteps) if default_timesteps else "from <algo>.yaml"))
     parser.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE", help="env cfg overrides, see env.py")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--init_from", type=Path, default=None, metavar="RUN[/FILE]",
+                        help="warm start: load policy, value and normalisers from a run's checkpoint "
+                             "(default file best_agent.pt); the observation and action sizes must match")
     add_suppress_arg(parser)
 
 
@@ -99,7 +102,7 @@ def quiet_physx_tensors():
     carb.settings.get_settings().set("/log/channels/omni.physx.tensors.plugin", "error")
 
 
-def train(raw_env, agent_cfg: dict, run_dir: Path, run: dict, seed: int):
+def train(raw_env, agent_cfg: dict, run_dir: Path, run: dict, seed: int, init_from: Path | None = None):
     """Train with skrl until `run["timesteps"]` (Ctrl+C stops early) and save a final checkpoint."""
     from isaaclab_rl.skrl import SkrlVecEnvWrapper
     from skrl.utils import set_seed
@@ -114,6 +117,10 @@ def train(raw_env, agent_cfg: dict, run_dir: Path, run: dict, seed: int):
     set_seed(seed)
     env = SkrlVecEnvWrapper(raw_env)
     runner = Runner(env, agent_cfg)
+    if init_from is not None:
+        ckpt = init_from if init_from.suffix == ".pt" else init_from / "checkpoints" / "best_agent.pt"
+        runner.agent.load(str(ckpt))
+        print(f"[train] warm start from {ckpt}")
     print(f"[train] {run['algo']} / {run['task']} / {run['num_envs']} envs / {timesteps} steps -> {run_dir}")
     try:
         runner.run()
