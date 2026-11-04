@@ -110,3 +110,44 @@ def test_high_speed_turn_opens_up_at_the_grip_limit():
 def test_flat_base_does_not_steer():
     radius, *_ = simulate(0, speed=6.0)
     assert radius == math.inf or radius > 1e3
+
+
+# -- two-half board (board_wrench) ------------------------------------------------------------------------------
+
+from envs.snow import board_wrench  # noqa: E402
+
+
+def halves(theta_nose: float, theta_tail: float, v: list[float], loads: list[float], camber=None, p=None):
+    q = torch.cat([quat_yaw_roll(0, math.radians(theta_nose)), quat_yaw_roll(0, math.radians(theta_tail))])
+    vel = torch.tensor([[v, v]])
+    return board_wrench(q.unsqueeze(0), vel, torch.zeros(1, 2, 3), torch.tensor([loads]), UP, DT, p or SnowParams(),
+                        camber_engaged=camber)
+
+
+def test_board_halves_match_rigid_board_below_flex_load():
+    # equal halves, centred load, camber flat, load below N_c: same steering target as the one-piece board
+    p = SnowParams()
+    _, _, rigid = snow_wrench(quat_yaw_roll(0, math.radians(25)), torch.tensor([[6.0, 0, 0]]), torch.zeros(1, 3),
+                              torch.tensor([300.0]), UP, DT, p)
+    _, _, split = halves(25, 25, [6.0, 0, 0], [150.0, 150.0], p=p)
+    assert split["omega_target"].item() == pytest.approx(rigid["omega_target"].item(), rel=1e-4)
+
+
+def test_unflattened_camber_does_not_steer():
+    _, _, info = halves(30, 30, [6.0, 0, 0], [150.0, 150.0], camber=torch.tensor([0.0]))  # below N_c: no flex
+    assert info["omega_target"].item() == pytest.approx(0.0, abs=1e-6)
+
+
+def test_pressing_tightens_and_shifting_load_widens():
+    base = halves(30, 30, [5.0, 0, 0], [200.0, 200.0])[2]["curvature"].item()
+    pressed = halves(30, 30, [5.0, 0, 0], [600.0, 600.0])[2]["curvature"].item()
+    forward = halves(30, 30, [5.0, 0, 0], [380.0, 20.0])[2]["curvature"].item()
+    assert pressed > base > forward
+
+
+def test_twisted_halves_grip_on_their_own_edge():
+    f, _, info = halves(30, 2, [5.0, 2.0, 0], [300.0, 300.0])
+    p = SnowParams()
+    # nose: on edge, full grip; tail: almost flat, little grip
+    assert abs(f[0, 0, 1].item()) == pytest.approx(p.mu_edge * 300.0, rel=1e-3)
+    assert abs(f[0, 1, 1].item()) < 0.3 * p.mu_edge * 300.0

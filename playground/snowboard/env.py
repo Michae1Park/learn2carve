@@ -27,7 +27,7 @@ import torch
 from isaaclab.utils import configclass, index_fill_
 from isaaclab.utils.math import quat_apply
 
-from envs.carve_env import CarveEnv, CarveEnvCfg
+from envs.carve_env import CarveEnv, CarveEnvCfg, base_obs_size, num_dof
 from envs.mountain import FENCE_HALF_WIDTH
 
 TASKS = ("sideslip", "skid", "carve")
@@ -36,7 +36,7 @@ TASKS = ("sideslip", "skid", "carve")
 @configclass
 class SnowboardEnvCfg(CarveEnvCfg):
     episode_length_s = 12.0
-    observation_space = 87 + 28 + 14  # carve env obs + last action + task obs (see _task_obs)
+    observation_space = 87 + 28 + 14  # carve env obs + last action + task obs (see _task_obs); recomputed from the DoF
     action_scale = 0.25  # fraction of each joint's half-range per unit action; the carve env's 0.5 flails
 
     task: str = "sideslip"  # sideslip | skid | carve
@@ -88,6 +88,7 @@ class SnowboardEnv(CarveEnv):
     def __init__(self, cfg: SnowboardEnvCfg, render_mode: str | None = None, **kwargs):
         if cfg.task not in TASKS:
             raise ValueError(f"unknown task {cfg.task!r}, pick one of: {', '.join(TASKS)}")
+        cfg.observation_space = base_obs_size(cfg) + num_dof(cfg) + 14
         n, dev = cfg.scene.num_envs, cfg.sim.device
         # task state must exist before super().__init__, which resets every env
         self.phase = torch.zeros(n, device=dev)  # φ [rad]

@@ -37,7 +37,7 @@ from isaaclab_physx.sim.spawners.materials import PhysxRigidBodyMaterialCfg
 
 from . import config
 from .rider import rider_cfg
-from .snow import SnowParams, air_drag, snow_wrench
+from .snow import SnowParams, air_drag, board_wrench, snow_wrench
 
 STANCE_FILE = config.ROOT / "envs/assets/stance.yaml"
 KEY_BODIES = ["right_hand", "left_hand", "right_foot", "left_foot"]
@@ -88,6 +88,17 @@ class CarveEnvCfg(DirectRLEnvCfg):
     start_speed = (2.0, 5.0)  # m/s along the board at reset
     start_yaw_deg = 0.0  # ± board heading from the fall line at reset
 
+    # rider model (defaults = the baseline 28-DoF rider at 120 Hz); see docs/HUMANOID_MODEL.md
+    physics_hz: int = 120  # PhysX rate; the policy stays at 30 Hz (decimation = physics_hz / 30)
+    solver_iterations: tuple[int, int] = (32, 4)  # PhysX (position, velocity) iterations
+    thoracic: bool = False  # + 2-DoF thoracic joint (chest roll / pitch): 30 DoF
+    neck_stiffness_scale: float = 1.0
+    spine_damping_scale: float = 1.0  # abdomen + thorax damping × this (anti-jerk)
+    pelvis_mass_frac: float | None = None  # pelvis share of the rider's mass (stock: 0.126); None = stock
+    compliant_drives: bool = False  # per-joint-group stiffness (envs/rider.py COMPLIANT) instead of uniform, stiff
+    # board model (defaults = one rigid board); see docs/BOARD_MODEL.md
+    board_flex: bool = False  # two halves + torsion/camber spring; progressive sidecut and flex in the snow model
+
     sim: SimulationCfg = SimulationCfg(
         dt=1 / 120,
         render_interval=decimation,
@@ -102,6 +113,35 @@ class CarveEnvCfg(DirectRLEnvCfg):
         self.scene.robot = rider_cfg(stance=load_stance())
 
 
+def num_dof(cfg: CarveEnvCfg) -> int:
+    """Actuated (policy-driven) DoF."""
+    return 28 + (2 if cfg.thoracic else 0)
+
+
+def base_obs_size(cfg: CarveEnvCfg) -> int:
+    """AMP humanoid observation (2 · all DoF + 25) + board/snow state (6, + 4 for a two-half board)."""
+    joints = num_dof(cfg) + (2 if cfg.board_flex else 0)  # the board's torsion / camber DoFs are observed too
+    return 2 * joints + 25 + 6 + (4 if cfg.board_flex else 0)
+
+
+def apply_rider_options(cfg: CarveEnvCfg) -> None:
+    """Rebuild what depends on the rider options. Runs in __init__: --set overrides land after __post_init__."""
+    if cfg.physics_hz % 30:
+        raise ValueError(f"physics_hz must be a multiple of the 30 Hz policy rate, got {cfg.physics_hz}")
+    cfg.decimation = cfg.physics_hz // 30
+    cfg.sim.dt = 1.0 / cfg.physics_hz
+    cfg.sim.render_interval = cfg.decimation
+    cfg.action_space = num_dof(cfg)
+    if cfg.observation_space == 81 + 6:  # the carve env's own default; subclasses set theirs from base_obs_size
+        cfg.observation_space = base_obs_size(cfg)
+    cfg.scene.robot = rider_cfg(
+        stance=load_stance(), solver_iterations=tuple(cfg.solver_iterations), thoracic=cfg.thoracic,
+        neck_stiffness_scale=cfg.neck_stiffness_scale, spine_damping_scale=cfg.spine_damping_scale,
+        compliant_drives=cfg.compliant_drives, board_flex=cfg.board_flex,
+    )
+    cfg.scene.board_contact.prim_path = "{ENV_REGEX_NS}/Robot/board" + (".*" if cfg.board_flex else "")
+
+
 def slope_quat(angle_deg: float) -> tuple[float, float, float, float]:
     """Slope frame → world rotation (x, y, z, w): about +y, so the slope's x (downhill) points to +x and down."""
     a = math.radians(angle_deg)
@@ -112,6 +152,7 @@ class CarveEnv(DirectRLEnv):
     cfg: CarveEnvCfg
 
     def __init__(self, cfg: CarveEnvCfg, render_mode: str | None = None, **kwargs):
+        apply_rider_options(cfg)
         # slope set here, not in __post_init__: --set overrides land after the cfg is constructed
         slope_deg = cfg.slope_deg if cfg.slope_deg is not None else config.load()["slope"]["angle_deg"]
         self.slope_deg = slope_deg
@@ -131,7 +172,14 @@ class CarveEnv(DirectRLEnv):
         self.robot = self.scene["robot"]
         self.contact = self.scene["board_contact"]
         names = self.robot.data.body_names
-        self.board_id = names.index("board")
+        self.board_id = names.index("board")  # the whole board, or its nose half (frame at the board centre)
+        self.board_ids = [self.board_id] + ([names.index("board_tail")] if self.cfg.board_flex else [])
+        contact_names = self.contact.body_names
+        self.contact_ids = [contact_names.index(names[i]) for i in self.board_ids]
+        joints = self.robot.joint_names
+        self.actuated = torch.tensor([i for i, j in enumerate(joints) if not j.startswith("board_flex")],
+                                     device=self.device)
+        self.bend_id = joints.index("board_flex:1") if self.cfg.board_flex else None
         self.pelvis_id = names.index("pelvis")
         self.torso_id = names.index("torso")
         self.key_ids = [names.index(n) for n in KEY_BODIES]
@@ -140,7 +188,12 @@ class CarveEnv(DirectRLEnv):
         self._scale_to_rider_mass(params["rider"]["mass"])
         self.snow = SnowParams.from_config(params["snow"], params["board"], params["rider"]["mass"])
         self.snow_info: dict[str, torch.Tensor] = {}
-        self.slip_z = torch.zeros(self.num_envs, device=self.device)  # grip spring state (snow.py)
+        # grip spring state (snow.py), one per board half
+        self.slip_z = torch.zeros(self.num_envs, len(self.board_ids), device=self.device).squeeze(-1)
+        if self.cfg.board_flex:
+            from .rider import camber_angle
+
+            self.camber_rest = camber_angle(params["board"]["effective_edge"])
 
         # stance: default joint targets, and the pelvis pose relative to the board
         stance = load_stance()
@@ -152,21 +205,31 @@ class CarveEnv(DirectRLEnv):
 
         limits = self.robot.data.soft_joint_pos_limits.torch[0]
         self.joint_lower, self.joint_upper = limits[:, 0], limits[:, 1]
-        self.action_scale = self.cfg.action_scale * 0.5 * (self.joint_upper - self.joint_lower)
+        self.action_scale = (self.cfg.action_scale * 0.5 * (self.joint_upper - self.joint_lower))[self.actuated]
         self.actions = torch.zeros(self.num_envs, self.cfg.action_space, device=self.device)
 
     def _scale_to_rider_mass(self, rider_mass: float) -> None:
         """The AMP humanoid is ~36 kg. Scale masses, inertias and joint gains so dynamics stay similar at 65 kg."""
         mass = self.robot.data.body_mass.torch.clone()
-        human = [i for i in range(mass.shape[1]) if i != self.board_id]
+        human = [i for i in range(mass.shape[1]) if i not in self.board_ids]
         k = rider_mass / mass[0, human].sum().item()
-        mass[:, human] *= k
+        per_body = torch.full((mass.shape[1],), k, device=mass.device)
+        per_body[self.board_ids] = 1.0
+        if self.cfg.pelvis_mass_frac is not None:
+            # heavy root: the pelvis takes this share of the rider's mass, the rest scale down to keep the total
+            scaled = mass[0] * per_body
+            others = [i for i in human if i != self.pelvis_id]
+            per_body[self.pelvis_id] *= self.cfg.pelvis_mass_frac * rider_mass / scaled[self.pelvis_id].item()
+            per_body[others] *= (1 - self.cfg.pelvis_mass_frac) * rider_mass / scaled[others].sum().item()
+        mass *= per_body
         inertia = self.robot.data.body_inertia.torch.clone()
-        inertia[:, human] *= k
+        inertia *= per_body.view(1, -1, 1)
         self.robot.set_masses_index(masses=mass)
         self.robot.set_inertias_index(inertias=inertia)
-        self.robot.write_joint_stiffness_to_sim_index(stiffness=self.robot.data.joint_stiffness.torch * k)
-        self.robot.write_joint_damping_to_sim_index(damping=self.robot.data.joint_damping.torch * k)
+        gain = torch.full((len(self.robot.joint_names),), k, device=mass.device)
+        gain[[i for i, j in enumerate(self.robot.joint_names) if j.startswith("board_flex")]] = 1.0  # board spring
+        self.robot.write_joint_stiffness_to_sim_index(stiffness=self.robot.data.joint_stiffness.torch * gain)
+        self.robot.write_joint_damping_to_sim_index(damping=self.robot.data.joint_damping.torch * gain)
         self.mass_scale = k
 
     def _setup_scene(self):
@@ -206,29 +269,35 @@ class CarveEnv(DirectRLEnv):
         self.actions = actions.clamp(-1.0, 1.0)
 
     def _apply_action(self):
-        target = (self.stance_pos + self.action_scale * self.actions).clamp(self.joint_lower, self.joint_upper)
+        target = self.stance_pos.clone()  # the board's spring DoFs keep their rest target: the policy can't drive them
+        target[:, self.actuated] += self.action_scale * self.actions
+        target = target.clamp(self.joint_lower, self.joint_upper)
         self.robot.actuators.target_command.set_position_index(value=target)
         self._apply_snow()
 
     def _apply_snow(self):
         # all in the slope frame; the resulting forces go back to the world frame
-        normal_force = (self.to_slope(self.contact.data.net_forces_w.torch[:, 0]) * self.up).sum(-1)
-        force, torque, self.snow_info = snow_wrench(
-            self.body_quat(self.board_id),
-            self.body_lin_vel(self.board_id),
-            self.body_ang_vel(self.board_id),
-            normal_force,
-            self.up,
-            self.physics_dt,
-            self.snow,
-            self.slip_z,
-        )
+        contact = self.contact.data.net_forces_w.torch[:, self.contact_ids]
+        normal_force = (self.to_slope(contact) * self.up).sum(-1)  # (N, halves)
+        if self.cfg.board_flex:
+            bend = self.robot.data.joint_pos.torch[:, self.bend_id]  # -φ₀ at rest (camber), 0 pressed flat
+            force, torque, self.snow_info = board_wrench(
+                self.body_quat(self.board_ids), self.body_lin_vel(self.board_ids), self.body_ang_vel(self.board_ids),
+                normal_force, self.up, self.physics_dt, self.snow, self.slip_z,
+                camber_engaged=1.0 + bend / self.camber_rest,
+            )
+        else:
+            force, torque, self.snow_info = snow_wrench(
+                self.body_quat(self.board_id), self.body_lin_vel(self.board_id), self.body_ang_vel(self.board_id),
+                normal_force[:, 0], self.up, self.physics_dt, self.snow, self.slip_z,
+            )
+            force, torque = force.unsqueeze(1), torque.unsqueeze(1)
         self.slip_z = self.snow_info["slip_z"]
-        drag = air_drag(self.body_lin_vel(self.pelvis_id), self.snow)
+        drag = air_drag(self.body_lin_vel(self.pelvis_id), self.snow).unsqueeze(1)
         self.robot.instantaneous_wrench_composer.add_forces_and_torques_index(
-            forces=self.to_world(torch.stack([force, drag], dim=1)),
-            torques=self.to_world(torch.stack([torque, torch.zeros_like(drag)], dim=1)),
-            body_ids=[self.board_id, self.pelvis_id],
+            forces=self.to_world(torch.cat([force, drag], dim=1)),
+            torques=self.to_world(torch.cat([torque, torch.zeros_like(drag)], dim=1)),
+            body_ids=self.board_ids + [self.pelvis_id],
             is_global=True,
         )
 
@@ -257,11 +326,18 @@ class CarveEnv(DirectRLEnv):
             ],
             dim=-1,
         )
+        if self.cfg.board_flex:  # nose / tail edge angles (torsion), load on the nose, how flat the camber is
+            board = torch.cat([board, info["edge_halves"], info["load_nose"].unsqueeze(-1),
+                               info["camber_engaged"].unsqueeze(-1)], dim=-1)
         return {"policy": torch.cat([obs, board], dim=-1)}
 
     def _zero_snow_info(self) -> dict[str, torch.Tensor]:
         z = torch.zeros(self.num_envs, device=self.device)
-        return {k: z for k in ("edge_angle", "v_long", "v_lat", "normal_force", "grip_usage")}
+        info = {k: z for k in ("edge_angle", "v_long", "v_lat", "normal_force", "grip_usage")}
+        if self.cfg.board_flex:
+            info |= {"edge_halves": torch.zeros(self.num_envs, 2, device=self.device), "load_nose": z + 0.5,
+                     "camber_engaged": z}
+        return info
 
     def _get_rewards(self) -> torch.Tensor:
         # Stage 3 task reward: stay upright and make progress downhill (capped so it doesn't just tuck)
