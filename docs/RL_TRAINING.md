@@ -31,7 +31,7 @@ and how long each turn is, depends on speed, slope and how hard the edge can hol
 **A guide to start from.** Learning to turn from nothing is slow, so the turn tasks begin with a guide S that the
 policy traces, then fades out:
 
-$$y_{\text{guide}}(x) = Y\sin\!\left(\frac{2\pi x}{\lambda} + \varphi\right),\quad Y = \frac{\lambda\tan A}{2\pi} \qquad A \sim U(35°, 50°),\ \varphi \in \{0, \pi\}$$
+$$y_{\text{guide}}(x) = Y\sin\!\left(\frac{2\pi x}{\lambda} + \varphi\right),\quad Y = \frac{\lambda\tan A}{2\pi} \qquad A \sim U(50°, 60°),\ \varphi \in \{0, \pi\}$$
 
 $\lambda$ is drawn per episode so the S stays carvable: tightest bend $\lambda / (2\pi\tan A) \ge 9$ m (sidecut 5–7 m),
 swing $Y \le 15$ m (fences at ±20 m). The rider starts on the guide, heading along it, at 4–6 m/s.

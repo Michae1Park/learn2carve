@@ -61,9 +61,9 @@ class SnowboardEnvCfg(CarveEnvCfg):
     # Each episode: crossing angle A, then a turn length λ that keeps the S carvable: tightest bend
     # λ / (2π tan A) ≥ guide_min_radius (sidecut 5–7 m; 2.8 m bends made riders throw themselves), swing
     # λ tan A / 2π ≤ guide_max_swing (fences at ±20 m).
-    guide_amp_deg = (35.0, 50.0)  # angle at which the guide crosses the fall line
-    guide_min_radius = 9.0  # m
-    guide_max_swing = 15.0  # m
+    guide_amp_deg = (50.0, 60.0)  # angle at which the guide crosses the fall line (was 35-50: a narrow S; 60 is the most the swing limit allows)
+    guide_min_radius = 4.5  # m: a 50° edge turns a ~6 m sidecut in ~4 m (was 9 for gentle edges)
+    guide_max_swing = 17.0  # m (fences at ±20)
     guide_lookahead = 6.0  # m, pure pursuit back onto the guide
     run_length: float | None = None  # m; end the episode (as a time-out) this far down (play.py sets it)
 
