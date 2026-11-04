@@ -1,4 +1,4 @@
-"""Board–snow force model for groomed hardpack (Stage 1, D-004).
+"""Board–snow force model for groomed hardpack (Stage 1).
 
 PhysX sees a frictionless ground; this module supplies everything snow does to the board:
 

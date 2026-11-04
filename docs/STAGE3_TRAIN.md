@@ -31,12 +31,12 @@ reward = w_style · r_style  +  w_task · r_task
 | B RL | 0.5 | 0.5 | Final policy: keeps the style, stays up |
 
 Phase A is the "imitation learning" box in the diagram, and phase B is the "RL" box. Both are the same
-training script with different weights, so there's no separate behavior-cloning code (see D-002).
+training script with different weights, so there's no separate behavior-cloning code.
 
 **Reference state initialization:** start episodes at random frames of the clip. This is cheap and the
 biggest single help for imitation.
 
-**Pelvis assist (D-006):** an upward/stabilizing force on the pelvis that fades from
+**Pelvis assist:** an upward/stabilizing force on the pelvis that fades from
 `train.assist.max_force` to 0 over `anneal_iters`. Final evaluation runs with the assist off.
 
 ## Done when

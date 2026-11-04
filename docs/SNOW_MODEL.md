@@ -79,4 +79,4 @@ airborne board has no grip).
 - **A flat board resists pivoting.** Without that, it spins up by itself and throws the rider.
 - **Drag acts on the body, not the board.** Through the feet it would pitch the rider forward.
 - **Every quantity is in the slope frame.** The model only needs the snow normal, so tilted terrain and tilted
-  gravity give identical results (D-008).
+  gravity give identical results.

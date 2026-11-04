@@ -36,8 +36,6 @@ The simulation is built first (Stage 1) so it can be tested before a clip exists
 | **3 Train** | "Imitate, then RL" | Policy checkpoint | [STAGE3_TRAIN](STAGE3_TRAIN.md) |
 | **4 Show** | "Did the demo help?" | Video + one plot | [STAGE4_SHOW](STAGE4_SHOW.md) |
 
-Design rationale: [DECISIONS.md](DECISIONS.md).
-
 ## Layout
 
 ```
