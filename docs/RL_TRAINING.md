@@ -90,6 +90,7 @@ $$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{turn}}\,\mathbb{1}[\text{turn}] \
 | **Edge change** | Per flip of the held edge (smoothed, $\ge 20°$) from heel to toe or back: the S needs both edges (a policy rode 98% of 23 s on the heel edge and ended at the fence) | 10.0 |
 | **Edge hold** | clip$\big((t_{\text{same edge}} - 3.5\,\text{s})/2\,\text{s},\ 0,\ 1\big)$: staying on one edge | −8.0 |
 | **Release** | once the turn has swung (heading swing 30° to 55°), rolling the held edge toward the other side: clip(roll rate / 1 rad/s), dense: the way out of the edge | 2.0 |
+| **Wrong edge** | the held edge on the side that turns the wrong way for the S: clip(angle / 30°). The S asks to turn away from the fall line until the swing reaches 55°, then back; the edge sign needed is the opposite of the heading rate (heel edge $\theta<0$: heading up). Every edge-gated reward (carve, hand, arm, height, swing) counts only the right edge | −4.0 |
 | **Deep edge** | held edge beyond 60°, ramping over 15°: too deep to roll back out of | −3.0 |
 | **Uphill** | $\operatorname{clip}((\lvert\psi\rvert - 90°)/15°,\ 0,\ 1)$: heading back up the hill after a turn | −5.0 |
 | **Hips back** | the pelvis behind the feet's midpoint along the board, clip(offset / 0.10 m): the hips push toward the tail, loading the back foot | 1.0 |

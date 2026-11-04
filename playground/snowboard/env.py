@@ -81,6 +81,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_low = 1.0  # turn tasks, always: pelvis 0.30–0.45 m above the board, ramping up from the 0.80 m stance; never sit
                    # down (0 at 0.12 m: an ungated version was gamed by leaning back)
     rew_edge_switch = 10.0  # turn tasks: per edge change, the held edge (smoothed, ≥20°) flips from heel to toe or back
+    rew_wrong_edge = -4.0  # turn tasks: held edge on the side that turns the wrong way for the S (heel when it needs toe and back): clip(angle / 30°)
     rew_release = 2.0  # turn tasks: once the turn has swung (≥30-55°), rolling the held edge toward the OTHER side, dense: clip(roll rate / 1 rad/s)
     rew_deep_edge = -3.0  # turn tasks: held edge beyond 60°, ramping over 15°: too deep to roll back out of (a rider sat at -75°)
     rew_edge_hold = -8.0  # turn tasks: staying on one edge longer than edge_hold_after_s: per second, ramping over edge_hold_ramp_s
@@ -296,7 +297,15 @@ class SnowboardEnv(CarveEnv):
         speed, e_slip, psi = self.board_speed(), self.slip_error(), self.path_heading()
         turns = cfg.task != "sideslip"
         zeros = torch.zeros_like(speed)
-        edge = self.edge_ema.abs()  # the held edge: flipping it back and forth (chatter) averages out to nothing
+        edge_abs = self.edge_ema.abs()  # the held edge: flipping it back and forth (chatter) averages out to nothing
+        # which way the S asks for the path to turn: away from the fall line until the swing reaches min_turn, then
+        # back through it (the turn side and swing are in the observation). The heading rate has the sign opposite
+        # to the edge angle (heel edge, θ < 0: heading up), so the edge the S needs has sign -d.
+        d = torch.where(self.turn_swing >= self.min_turn, -self.turn_side, self.turn_side)
+        right_edge = -d * self.edge_ema  # > 0 on the edge that turns the right way
+        edge = torch.where(d != 0, right_edge.clamp(min=0.0), edge_abs)  # only the right edge counts for the edge-gated terms
+        wrong = torch.where(d != 0, (-right_edge).clamp(min=0.0), torch.zeros_like(edge_abs))
+        self._track("edge_dir_deg", torch.where(d != 0, right_edge, torch.zeros_like(edge_abs)).rad2deg())
         clean = torch.exp(-(self.slip_angle() / math.radians(cfg.sigma_slip_deg)).square())
         tech = self._technique() if turns else {}  # also logs pelvis height and angulation
         hip_tail, back_share = self.stance_balance() if turns else (zeros, zeros)
@@ -327,7 +336,8 @@ class SnowboardEnv(CarveEnv):
             "uphill": ((psi.abs() - math.radians(90.0)) / math.radians(15.0)).clamp(0.0, 1.0) if turns else zeros,
             "release": ((-self.edge_side * self.edge_ema_rate / 1.0).clamp(0.0, 1.0)
                         * ((self.turn_swing - math.radians(30.0)) / math.radians(25.0)).clamp(0.0, 1.0) if turns else zeros),
-            "deep_edge": ((edge - math.radians(60.0)) / math.radians(15.0)).clamp(0.0, 1.0) if turns else zeros,
+            "wrong_edge": (wrong / math.radians(30.0)).clamp(0.0, 1.0) if turns else zeros,
+            "deep_edge": ((edge_abs - math.radians(60.0)) / math.radians(15.0)).clamp(0.0, 1.0) if turns else zeros,
             "edge_hold": ((self.since_switch - cfg.edge_hold_after_s) / cfg.edge_hold_ramp_s).clamp(0.0, 1.0) if turns else zeros,
             "traverse": ((self.since_turn - cfg.traverse_after_s) / cfg.traverse_ramp_s).clamp(0.0, 1.0) if turns else zeros,
             "height": (torch.exp(-((self.pelvis_height() - (0.50 - 0.25 * (edge / math.radians(45.0)).clamp(0.0, 1.0)))
