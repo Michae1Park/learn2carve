@@ -105,6 +105,12 @@ class CarveEnvCfg(DirectRLEnvCfg):
     neck_stiffness_scale: float = 1.0
     spine_damping_scale: float = 1.0  # abdomen + thorax damping × this (anti-jerk)
     pelvis_mass_frac: float | None = None  # pelvis share of the rider's mass (stock: 0.126); None = stock
+    leg_action_scale: float | None = None  # hips + knees: fraction of half-range per unit action; None = action_scale
+    knee_rotation: bool = False  # + ±20° axial twist per knee (2 DoF)
+    # joint groups left to their drives (held at the stance target, still physical) instead of the policy: fewer
+    # actions to explore. Any of PASSIVE_GROUPS: "ankle" (6, boots), "neck" (3), "knee:2" (2, knee twist)
+    passive_joints: tuple[str, ...] = ()
+    stiff_boots: bool = False  # ankles held near their stance angle, 3× stiffer (envs/rider.py BOOT_RANGE_DEG)
     compliant_drives: bool = False  # per-joint-group stiffness (envs/rider.py COMPLIANT) instead of uniform, stiff
     # board model (defaults = one rigid board); see docs/BOARD_MODEL.md
     board_flex: bool = False  # two halves + torsion/camber spring; progressive sidecut and flex in the snow model
@@ -124,15 +130,29 @@ class CarveEnvCfg(DirectRLEnvCfg):
         self.scene.robot = rider_cfg(stance=load_stance())
 
 
+# Joint groups the policy can leave passive (held by their drives at the stance target): DoF-name substring -> count
+PASSIVE_GROUPS = {"ankle": 6, "neck": 3, "knee:2": 2}
+
+
+def num_joints(cfg: CarveEnvCfg) -> int:
+    """All rider DoF in the articulation, actuated or not (the board's spring DoFs included)."""
+    return 28 + (2 if cfg.thoracic else 0) + (2 if cfg.knee_rotation else 0) + (2 if cfg.board_flex else 0)
+
+
+def is_passive(cfg: CarveEnvCfg, joint: str) -> bool:
+    return joint.startswith("board_flex") or any(g in joint for g in cfg.passive_joints)
+
+
 def num_dof(cfg: CarveEnvCfg) -> int:
-    """Actuated (policy-driven) DoF."""
-    return 28 + (2 if cfg.thoracic else 0)
+    """Actuated (policy-driven) DoF = the action size."""
+    passive = sum(n for g, n in PASSIVE_GROUPS.items() if g in cfg.passive_joints
+                  and (g != "knee:2" or cfg.knee_rotation))
+    return num_joints(cfg) - (2 if cfg.board_flex else 0) - passive
 
 
 def base_obs_size(cfg: CarveEnvCfg) -> int:
     """AMP humanoid observation (2 · all DoF + 25) + board/snow state (6, + 4 for a two-half board)."""
-    joints = num_dof(cfg) + (2 if cfg.board_flex else 0)  # the board's torsion / camber DoFs are observed too
-    return 2 * joints + 25 + 6 + (4 if cfg.board_flex else 0)
+    return 2 * num_joints(cfg) + 25 + 6 + (4 if cfg.board_flex else 0)
 
 
 def apply_rider_options(cfg: CarveEnvCfg) -> None:
@@ -150,7 +170,8 @@ def apply_rider_options(cfg: CarveEnvCfg) -> None:
         stance=load_stance(angles), binding_angles=angles, solver_iterations=tuple(cfg.solver_iterations),
         thoracic=cfg.thoracic,
         neck_stiffness_scale=cfg.neck_stiffness_scale, spine_damping_scale=cfg.spine_damping_scale,
-        compliant_drives=cfg.compliant_drives, board_flex=cfg.board_flex,
+        compliant_drives=cfg.compliant_drives, board_flex=cfg.board_flex, stiff_boots=cfg.stiff_boots,
+        knee_rotation=cfg.knee_rotation,
     )
     cfg.scene.board_contact.prim_path = "{ENV_REGEX_NS}/Robot/board" + (".*" if cfg.board_flex else "")
 
@@ -190,8 +211,9 @@ class CarveEnv(DirectRLEnv):
         contact_names = self.contact.body_names
         self.contact_ids = [contact_names.index(names[i]) for i in self.board_ids]
         joints = self.robot.joint_names
-        self.actuated = torch.tensor([i for i, j in enumerate(joints) if not j.startswith("board_flex")],
+        self.actuated = torch.tensor([i for i, j in enumerate(joints) if not is_passive(self.cfg, j)],
                                      device=self.device)
+        assert len(self.actuated) == self.cfg.action_space, (len(self.actuated), self.cfg.action_space)
         self.bend_id = joints.index("board_flex:1") if self.cfg.board_flex else None
         self.pelvis_id = names.index("pelvis")
         self.torso_id = names.index("torso")
@@ -218,7 +240,11 @@ class CarveEnv(DirectRLEnv):
 
         limits = self.robot.data.soft_joint_pos_limits.torch[0]
         self.joint_lower, self.joint_upper = limits[:, 0], limits[:, 1]
-        self.action_scale = (self.cfg.action_scale * 0.5 * (self.joint_upper - self.joint_lower))[self.actuated]
+        scale = torch.full_like(self.joint_lower, self.cfg.action_scale)
+        if self.cfg.leg_action_scale is not None:  # hips and knees drive the edge and the squat: give them more range
+            legs = [i for i, j in enumerate(self.robot.joint_names) if "hip" in j or "knee" in j]
+            scale[legs] = self.cfg.leg_action_scale
+        self.action_scale = (scale * 0.5 * (self.joint_upper - self.joint_lower))[self.actuated]
         self.actions = torch.zeros(self.num_envs, self.cfg.action_space, device=self.device)
 
     def _scale_to_rider_mass(self, rider_mass: float) -> None:

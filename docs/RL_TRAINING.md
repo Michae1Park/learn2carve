@@ -36,11 +36,17 @@ $$y_{\text{guide}}(x) = Y\sin\!\left(\frac{2\pi x}{\lambda} + \varphi\right),\qu
 $\lambda$ is drawn per episode so the S stays carvable: tightest bend $\lambda / (2\pi\tan A) \ge 9$ m (sidecut 5–7 m),
 swing $Y \le 15$ m (fences at ±20 m). The rider starts on the guide, heading along it, at 4–6 m/s.
 
-| | Start of training | After 6000 steps (half of training) |
-|---|---|---|
-| Guide reward $w_{\text{guide}}\,r_{\text{track}}(\psi - \psi_{\text{guide}})$ | Weight 2.0 | **0**: faded out linearly |
-| Guide in the observation | Heading error to the guide | **Zeros** (faded the same way) |
-| Turn length, width, rhythm, how to press | Shaped by the guide | **The policy's own** |
+The guide fades **adaptively**: only while the policy follows it.
+
+| Mean guide heading error (all envs, running) | Guide strength (reward and observation) |
+|---|---|
+| < 15°: it's tracking | Fades, −1/3000 per step |
+| > 30°: it lost it | Comes back, +1/3000 per step |
+| between | Holds |
+
+Once the strength reaches 0, turn length, width, rhythm and how to press are the policy's own. A fixed schedule
+(fade over the first half of training) failed: the guide was gone before the policy could ride well enough to
+follow it.
 
 Each episode draws its own S, so no single shape is learned. Play and evaluation always run with the guide off.
 
@@ -60,32 +66,34 @@ Each episode draws its own S, so no single shape is learned. Play and evaluation
 |---|---|---|---|
 | Baseline rider, rigid board | 28 | 131 | 28 |
 | New rider, two-half board | 30 (+2 passive board) | 145 | 30 |
+| Aggressive-carve rider (boots, knee twist, passive ankles / neck / knee twist) | 34 (21 actuated) | 140 | 21 |
 
 ## 3. Reward
 
-Each step, with $\Delta t = 1/30$ s, plus a bonus per completed turn:
+**What a good run achieves, not how to move.** Each step, with $\Delta t = 1/30$ s:
 
-$$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{turn}}\,\mathbb{1}[\text{turn completed}] \qquad r_{\text{track}}(e) = \exp\!\left(-\frac{e^2}{\sigma^2}\right)$$
+$$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{turn}}\,\mathbb{1}[\text{turn}] \;+\; w_{\text{fall}}\,\mathbb{1}[\text{fall or fence}]$$
 
-| Term | $r_i$ | $w_i$ | $\sigma$ |
-|---|---|---|---|
-| Alive | 1 while not fallen | 1.0 | |
-| Upright | $\max(0,\ \hat z_{\text{torso}} \cdot \hat n)$ | 1.0 | |
-| **Speed** | $r_{\text{track}}(\lVert v\rVert - v^*)$, $v^* \sim U(8, 11)$ m/s (side slip: 0.5–2.5) | 2.0 | 5 m/s |
-| **Over-speed** | $\operatorname{clip}\big((\lVert v\rVert - v^*)/5,\ 0,\ 1\big)$ | −1.0 | |
-| **Speed cap** | $\operatorname{clip}\big((\lVert v\rVert - 12)/2,\ 0,\ 1\big)$: forces turning | −3.0 | |
-| **Fall** | Once, when the episode ends in a fall or past a fence | −10 | |
-| **Edge** | Turn tasks: $\operatorname{clip}(\lvert\theta\rvert / \theta^*,\ 0,\ 1)$, $\theta^*$ = **40° carve**, 20° skid. Full reward from $\theta^*$ up, no penalty beyond: carving uses **40° and more** (up to ~85°) | 1.0 | |
-| Slip | $r_{\text{track}}(\lvert\beta\rvert - \beta^*)$ (side slip: $\beta - \beta^*$) | 2.0 | 15° |
-| Heading | Side slip only: $r_{\text{track}}(\psi)$ | 2.0 | 30° |
-| **Turn** | +1 per linked turn (turn tasks) | 1.0 | |
-| Guide | $r_{\text{track}}(\psi - \psi_{\text{guide}})$ × fade (turn tasks, first half of training) | 4.0 → 0 | 30° |
-| Guide line | $r_{\text{track}}(y - y_{\text{guide}})$ × fade | 1.0 → 0 | 3 m |
-| Pose | $\lVert q - q^{\text{stance}} \rVert^2$ | −0.1 | |
-| Action rate | $\lVert a_t - a_{t-1} \rVert^2$ | −0.01 | |
-| Torso wobble | $\lVert \omega_{\text{torso}} \rVert^2$ | −0.05 | |
+| Term | $r_i$ | $w_i$ |
+|---|---|---|
+| Alive | 1 while up | 1.0 |
+| **Speed** | $\exp\!\big(-((\lVert v\rVert - v^*)/5)^2\big)$, $v^* \sim U(8, 11)$ m/s | 2.0 |
+| **Speed cap** | $\operatorname{clip}\big((\lVert v\rVert - 12)/2,\ 0,\ 1\big)$: forces turns finished across the hill | −3.0 |
+| **Carve** | $\underbrace{\operatorname{clip}(\lvert\theta\rvert/40°)}_{\text{edged}} \cdot \underbrace{\operatorname{clip}(\lvert\dot\psi_{\text{board}}\rvert/0.5\text{ rad/s})}_{\text{turning}} \cdot \underbrace{e^{-(\beta/15°)^2}}_{\text{clean}}$: full at 40° and up | 2.0 |
+| **Turn** | +1 per linked turn (≥45° swing): links the turns | 1.0 |
+| **Fall** | Once, a fall or a fence | −10 |
+| Guide | $e^{-((\psi - \psi_{\text{guide}})/30°)^2}$ × adaptive fade | 4.0 → 0 |
+| Action rate | $\lVert a_t - a_{t-1} \rVert^2$ | −0.01 |
 
-**What's not in the reward:** turn length, turn width, where on the piste to turn. Only the fences bound the piste.
+**One carve term instead of five.** Edged, turning and clean multiply: tipped but riding straight, turning on a flat
+board, or skidding each earn about nothing. Posture (how low, which way the chest faces, angulation) is **not
+rewarded**: if a 40° carve needs it, the policy finds it, or a style reward learned from a real rider (Stage 3's AMP)
+adds it. An earlier version had 17 terms, including upright, low, facing, angulation and pose; it hand-designed the
+technique, its terms fought each other (pose pulled toward the stance, low pulled away), and each one was gamed.
+
+**Fewer actions.** Boots (ankles), neck and knee twist are left **passive** (`passive_joints`): still in the physics,
+held by their drives at the stance target, but not driven by the policy. 21 actions instead of 32: hips 6, knee
+flexion 2, spine 5, arms 8.
 
 **Lessons from the reward (each one cost a training run):**
 
@@ -98,6 +106,8 @@ $$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{turn}}\,\mathbb{1}[\text{turn com
 | Start at 11–15 m/s on the guide | 77–98% of episodes ended at a fence in ~2.5 s: 8–10 m/s sideways, no time to learn the first turn | Start at 4–6 m/s; **cap 12 m/s at −3/s**, fall −30 |
 | Cap 12 m/s, fall −30 | Learned to **ride flat**: edge angle 18° → 4°, straight at 13 m/s taking the cap penalty. No edge, no sidecut turn; −30 made trying to edge too costly | **Edge reward**; fall −10; guide weight 4 |
 | A turn = a 15° swing | Learned to turn (edge 17–19°, 0 falls) but **gamed the turn bonus**: ±15° wiggles every 0.7 s (14–16 "turns" per 10 s), still 5 m/s over the command | A turn needs a **45°** swing |
+| Guide faded on a fixed schedule | Every try: the guide was gone before the policy could ride, so the turn was never learned (baseline: 0 real turns at 70%) | **Adaptive guide**: fades only while followed |
+| Edge + angulation + low, ungated | **Leaned back onto the heel edge** (65° edge, pelvis 0.4 m, body near horizontal) and rode a straight diagonal into the fence: full edge, angulation and low reward, no turn | Edge and angulation pay only while the board turns; low has a floor |
 
 ## 4. PPO
 

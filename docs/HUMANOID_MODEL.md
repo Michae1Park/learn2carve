@@ -90,6 +90,10 @@ Each change is a flag on `CarveEnvCfg`; the defaults are the baseline above.
 | `spine_damping_scale=2` | Extra damping on abdomen + thorax: no torso jerks |
 | `pelvis_mass_frac=0.2` | **Heavy root**: the pelvis carries 20% of the mass (stock 12.6%), the rest scale down to keep 65 kg |
 | `physics_hz=240`, `solver_iterations=[16,4]` | Physics at 240 Hz (decimation 8), fewer solver iterations |
+| `knee_rotation=true` | **Knee twist.** Each knee becomes 2 DoF: `knee:0` flexion (0–160°) + `knee:2` axial twist about the shin (±20°, 0.3× the flexion stiffness). A real knee twists only when bent; the stance keeps them bent 40°+ |
+| `stiff_boots=true` | **Snowboard boots.** Ankles held within roll ±5°, flex ±10°, twist ±5° of their stance angle (stock ±30 / ±55 / ±40°), drives 3× stiffer: the edge has to come from the hips and knees |
+| `leg_action_scale=0.5` | Hips and knees get ±50% of their half-range per unit action (others ±25%): knees bend to ~86° |
+| `binding_angles_deg=[54,45]` | Steeper forward stance (`scripts/make_stance.py --angles 54 45 --open_deg 35`): hips face more toward the nose |
 
 **Spine:**
 

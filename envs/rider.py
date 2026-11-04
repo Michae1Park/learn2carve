@@ -275,6 +275,67 @@ JOINT_GROUP = {
 }
 
 
+KNEE_TWIST_DEG = 20.0  # ± axial (shin) rotation of a bent knee
+KNEE_TWIST_STIFFNESS = 0.3  # twist drive gains, × the knee's flexion gains: it gives under load
+
+
+def _twist_knees(stage, root: str) -> None:
+    """Knees: hinge -> 2 DoF. rotX = flexion (the hinge, unchanged), rotZ = axial twist about the shin, ±20°.
+
+    A real knee twists only when bent; PhysX limits can't couple the two, so the twist is always there. The snowboard
+    stance keeps the knees bent 40°+, where a real knee twists too. DoFs: <side>_knee:0 (flex), :2 (twist, by axis).
+    """
+    from pxr import UsdPhysics
+
+    for side in ("right", "left"):
+        prim = stage.GetPrimAtPath(f"{root}/joints/{side}_knee")
+        hinge = UsdPhysics.RevoluteJoint(prim)
+        lo, hi = hinge.GetLowerLimitAttr().Get(), hinge.GetUpperLimitAttr().Get()
+        old = UsdPhysics.DriveAPI(prim, "angular")  # _fix_hinge_drives copied the USD's drive:X here
+        k, d = old.GetStiffnessAttr().Get(), old.GetDampingAttr().Get()
+        prim.RemoveAPI(UsdPhysics.DriveAPI, "angular")
+        prim.RemoveAPI(UsdPhysics.DriveAPI, "X")
+        prim.SetTypeName("PhysicsJoint")  # D6; frames (localPos/Rot) carry over
+        for axis in ("transX", "transY", "transZ", "rotY"):
+            limit = UsdPhysics.LimitAPI.Apply(prim, axis)
+            limit.CreateLowAttr(1.0)
+            limit.CreateHighAttr(-1.0)
+        for axis, (a, b), gain in (("rotX", (lo, hi), 1.0),
+                                   ("rotZ", (-KNEE_TWIST_DEG, KNEE_TWIST_DEG), KNEE_TWIST_STIFFNESS)):
+            limit = UsdPhysics.LimitAPI.Apply(prim, axis)
+            limit.CreateLowAttr(a)
+            limit.CreateHighAttr(b)
+            drive = UsdPhysics.DriveAPI.Apply(prim, axis)
+            drive.CreateTypeAttr("force")
+            drive.CreateStiffnessAttr(k * gain)
+            drive.CreateDampingAttr(d * gain)
+            drive.CreateMaxForceAttr(3.4028234663852886e38)
+            drive.CreateTargetPositionAttr(0.0)
+
+
+# Snowboard boots: ± range around each ankle's stance angle [deg]. Stiff boots make the edge come from the hips and
+# knees, not from rolling the ankle. Stock ankle range: roll ±30, flex ±55, twist ±40.
+BOOT_RANGE_DEG = {"x": 5.0, "y": 10.0, "z": 5.0}  # roll, forward flex, twist
+BOOT_STIFFNESS = 3.0  # ankle drive gains × this
+ANKLES = {"right_foot": "right_ankle", "left_foot": "left_ankle"}  # USD joint prim -> DoF name prefix
+
+
+def _fit_boots(stage, root: str, cfg: RiderSpawnCfg) -> None:
+    from pxr import UsdPhysics
+
+    for joint, dof in ANKLES.items():
+        prim = stage.GetPrimAtPath(f"{root}/joints/{joint}")
+        for axis, half in BOOT_RANGE_DEG.items():
+            centre = cfg.boot_center_deg.get(f"{dof}_{axis}", 0.0)
+            limit = UsdPhysics.LimitAPI(prim, f"rot{axis.upper()}")
+            limit.GetLowAttr().Set(centre - half)
+            limit.GetHighAttr().Set(centre + half)
+            drive = UsdPhysics.DriveAPI(prim, f"rot{axis.upper()}")
+            drive.GetStiffnessAttr().Set(drive.GetStiffnessAttr().Get() * BOOT_STIFFNESS)
+            drive.GetDampingAttr().Set(drive.GetDampingAttr().Get() * BOOT_STIFFNESS)
+            drive.GetTargetPositionAttr().Set(centre)
+
+
 def _tune_drives(stage, root: str, cfg: RiderSpawnCfg) -> None:
     """Scale the USD's own PD gains per joint.
 
@@ -291,7 +352,7 @@ def _tune_drives(stage, root: str, cfg: RiderSpawnCfg) -> None:
         if group == "neck":
             k_scale *= cfg.neck_stiffness_scale
         d_scale = k_scale * (cfg.spine_damping_scale if group in ("abdomen", "thorax") else 1.0)
-        for axis in ("rotX", "rotY", "rotZ", "angular"):
+        for axis in ("rotX", "rotY", "rotZ", "angular"):  # knees with knee_rotation: rotX + rotZ
             if not prim.HasAPI(UsdPhysics.DriveAPI, axis):
                 continue
             drive = UsdPhysics.DriveAPI(prim, axis)
@@ -323,9 +384,13 @@ def spawn_rider(prim_path: str, cfg: RiderSpawnCfg, translation=None, orientatio
     prim = spawn_from_usd_file(prim_path, cfg.usd_path, cfg, translation, orientation)
     stage = prim.GetStage()
     _fix_hinge_drives(stage, prim_path)
+    if cfg.knee_rotation:
+        _twist_knees(stage, prim_path)
     if cfg.thoracic:
         _split_torso(stage, prim_path, cfg)
     _tune_drives(stage, prim_path, cfg)
+    if cfg.stiff_boots:
+        _fit_boots(stage, prim_path, cfg)
     _author_board(stage, prim_path, cfg)
     _dress(stage, prim_path)
     return prim
@@ -350,6 +415,9 @@ class RiderSpawnCfg(UsdFileCfg):
     thorax_stiffness: float = 400.0  # USD units (per degree), like the abdomen's 600
     thorax_armature: float = 0.025  # kg·m², rotor inertia added to the thorax DoFs (the USD uses 0.025)
     compliant_drives: bool = False  # per-group stiffness (COMPLIANT) instead of the stock uniform, very stiff drives
+    knee_rotation: bool = False  # knees get a ±20° axial twist (2 DoF each)
+    stiff_boots: bool = False  # snowboard boots: ankles held near their stance angle (BOOT_RANGE_DEG), 3× stiffer
+    boot_center_deg: dict = {}  # {ankle joint: stance angle [deg]}; filled by rider_cfg from the stance
     neck_stiffness_scale: float = 1.0  # neck PD gains × this
     spine_damping_scale: float = 1.0  # abdomen + thorax damping × this (anti-jerk)
 
@@ -380,9 +448,16 @@ def rider_cfg(stance: dict | None = None, world_pins: dict | None = None, solver
         board_mass=board["mass"],
         bindings=binding_frames(board, rider | ({"binding_angles_deg": list(binding_angles)} if binding_angles else {})),
         world_pins=world_pins or {},
+        boot_center_deg={k: math.degrees(v) for k, v in (stance or {}).get("joint_pos", {}).items() if "ankle" in k},
         **options,
     )
     init = ArticulationCfg.InitialStateCfg(pos=(0.0, 0.0, 1.0), joint_pos={".*": 0.0})
+    if stance is not None and options.get("knee_rotation"):  # the hinge's angle becomes flexion :0; twist :2 = 0
+        joints = dict(stance["joint_pos"])
+        for side in ("right", "left"):
+            joints[f"{side}_knee:0"] = joints.pop(f"{side}_knee")
+            joints[f"{side}_knee:2"] = 0.0  # D6 DoFs are numbered by axis: rotX :0, rotZ :2
+        stance = stance | {"joint_pos": joints}
     if stance is not None:
         init = ArticulationCfg.InitialStateCfg(
             pos=tuple(stance["pelvis_pos"]), rot=tuple(stance["pelvis_quat"]),
