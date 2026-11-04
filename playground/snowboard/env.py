@@ -72,7 +72,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     # Each term is multiplied by step_dt, except turn and fall (once per event).
     rew_alive = 1.0
     rew_speed = 2.0  # exp(-((|v| - v_cmd) / σ_v)²): the reason to turn
-    rew_speed_cap = -3.0  # × clip((|v| - speed_cap) / 2, 0, 1): over the cap is clearly worse than turning
+    rew_speed_cap = -10.0  # × clip((|v| - speed_cap) / 2, 0, 1): over the cap is clearly worse than turning
     speed_cap = 12.0  # m/s; a clean carve on 15° settles at ~19-21 m/s, so the cap forces turns finished across the hill
     # carve: edged × turning × clean × low = clip(|θ|/edge_target) · clip(|ψ̇_board|/0.5) · exp(-(β/σ)²) · (0.5 + 0.5 low)
     fall_height = 0.15  # pelvis above the snow [m]: at the apex of a deep carve the hips are ~0.2 m from it (was 0.45)
@@ -80,6 +80,10 @@ class SnowboardEnvCfg(CarveEnvCfg):
     edge_target_deg = 20.0  # full carve credit at or above this edge angle. Carve: 40 (see __post_init__)
     rew_low = 1.0  # turn tasks, always: pelvis 0.30–0.45 m above the board, ramping up from the 0.80 m stance; never sit
                    # down (0 at 0.12 m: an ungated version was gamed by leaning back)
+    rew_hand = 1.0  # turn tasks: the lowest hand near the snow while edged (the hand drags at the apex, hangs low at the edge change)
+    hand_scale = 0.30  # m: exp(-(lowest hand height / scale)²) × clip(edge / edge_target)
+    rew_straight = -3.0  # turn tasks: riding straight down the fall line, exp(-(heading / straight_sigma)²), costs this per second
+    straight_sigma_deg = 15.0
     rew_facing = 1.0  # turn tasks: shoulders open, chest toward the travel direction (the nose): max(cos, 0)
     rew_hip = 1.0  # turn tasks: the folded L from head to knee: torso-thigh angle 180° (straight) -> 0, 45° or tighter -> 1
     rew_slip = 2.0  # skid / side slip only (the carve term covers slip for carving): exp(-(slip error / σ_slip)²)
@@ -266,6 +270,10 @@ class SnowboardEnv(CarveEnv):
             * (0.5 + 0.5 * self.low()) * ((speed - 4.0) / 4.0).clamp(0.0, 1.0) if cfg.task == "carve" else zeros,
             "low": self.low() if turns else zeros,
             "facing": tech["facing"] if turns else zeros,
+            "hand": ((edge / math.radians(cfg.edge_target_deg)).clamp(0.0, 1.0)
+                     * torch.exp(-(self.body_pos(self.key_ids[:2])[..., 2].min(-1).values / cfg.hand_scale).square())
+                     if turns else zeros),
+            "straight": torch.exp(-(psi / math.radians(cfg.straight_sigma_deg)).square()) if turns else zeros,
             "hip": self.hip_fold() if turns else zeros,
             "slip": zeros if cfg.task == "carve" else torch.exp(-(e_slip / math.radians(cfg.sigma_slip_deg)).square()),
             "heading": zeros if turns else torch.exp(-(psi / math.radians(cfg.sigma_heading_deg)).square()),
