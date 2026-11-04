@@ -65,6 +65,7 @@ class RunStats:
         self.steps = 0
         self.sums = dict.fromkeys(("speed", "edge", "heading_err", "slip_err", "line_err"), 0.0)
         self.max_y = 0.0
+        self.rows = []  # per step: x, y, speed, slip°, edge° (saved as ride.csv for the longest run)
         self.turns = 0  # each time the path crosses the fall line
         self.side = 0  # which side of the fall line the path points to: -1, 0 (unknown yet), 1
 
@@ -83,6 +84,9 @@ class RunStats:
         self.sums["slip_err"] += abs(math.degrees(t.e_slip[0].item()))
         self.sums["line_err"] += abs(t.e_line[0].item())
         self.max_y = max(self.max_y, abs(env.position()[0, 1].item()))
+        x, y = env.position()[0].tolist()
+        self.rows.append((x, y, env.board_speed()[0].item(), math.degrees(env.slip_angle()[0].item()),
+                          math.degrees(env.snow_info["edge_angle"][0].item())))
 
     def line(self, number: int, end: str, step_dt: float) -> str:
         mean = {k: v / max(self.steps, 1) for k, v in self.sums.items()}
@@ -122,7 +126,9 @@ def main():
               f"turn length {wavelength:.0f} m, fence ±{raw_env.cfg.fence_half_width:.0f} m")
         print(f"[play] {RunStats.HEADER}")
         recorder = Recorder(raw_env, trail) if args.record else None
-        longest_secs, longest_marks = ride(env, raw_env, agent, trail, recorder)
+        longest_secs, longest_marks, rows = ride(env, raw_env, agent, trail, recorder)
+        csv = out.with_name(out.stem.replace("trail", "ride") + ".csv")  # next to trail.png
+        csv.write_text("x,y,speed,slip_deg,edge_deg\n" + "".join(",".join(f"{v:.3f}" for v in r) + "\n" for r in rows))
         if recorder:
             recorder.save(args.record)
 
@@ -164,12 +170,12 @@ def play_overrides(run_overrides: dict, defaults) -> tuple[dict, float, float]:
     return overrides, wavelength, run_length
 
 
-def ride(env, raw_env, agent, trail, recorder=None) -> tuple[float, list]:
-    """Play for --seconds, one printed line per run. Returns the longest run's (seconds, trail marks)."""
+def ride(env, raw_env, agent, trail, recorder=None) -> tuple[float, list, list]:
+    """Play for --seconds, one printed line per run. Returns the longest run's (seconds, trail marks, stat rows)."""
     steps = int(args.seconds / raw_env.step_dt)
     obs, _ = env.reset()
     stats, runs = RunStats(), 0
-    longest = (-1.0, [])
+    longest = (-1.0, [], [])
     for t in range(steps):
         with torch.inference_mode():
             if agent is None:
@@ -192,7 +198,7 @@ def ride(env, raw_env, agent, trail, recorder=None) -> tuple[float, list]:
             print(f"[play] {stats.line(runs, end, raw_env.step_dt)}")
             seconds = stats.steps * raw_env.step_dt
             if seconds > longest[0]:
-                longest = (seconds, list(trail.marks))
+                longest = (seconds, list(trail.marks), stats.rows)
             trail.marks.clear()
             trail.reset()
             stats = RunStats()

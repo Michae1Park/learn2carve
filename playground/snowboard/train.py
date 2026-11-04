@@ -34,7 +34,7 @@ import isaaclab.sim as sim_utils
 
 
 def main():
-    run_dir, run, agent_cfg = new_run(args, task=args.task, cfg_dir=HERE, log_root=LOG_ROOT)
+    run_dir, run, agent_cfg = new_run(args, task=args.task, cfg_dir=HERE, log_root=LOG_ROOT, seed=args.seed)
     sim_cfg = sim_utils.SimulationCfg()
     with launch_simulation(sim_cfg, args):
         from playground.snowboard.env import SnowboardEnv, SnowboardEnvCfg
