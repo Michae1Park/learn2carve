@@ -77,9 +77,9 @@ radius is a post-MVP refinement.
 
 ## Done when
 
-- [ ] Scripted board + 65 kg dummy mass, flat base on 15° → accelerates to a plausible top speed.
-- [ ] Scripted edge angle θ ∈ {10, 20, 30, 40}° at low speed → turn radius ≈ 7.6 · cos θ m.
-- [ ] Same θ at high speed → board washes out (grip limit reached) instead of turning tighter.
+- [x] Scripted board + 65 kg dummy mass, flat base on 15° → accelerates to a plausible top speed. (23.6 m/s, = formula; [SNOW_MODEL](SNOW_MODEL.md))
+- [x] Scripted edge angle θ ∈ {10, 20, 30, 40}° at low speed → turn radius ≈ 7.6 · cos θ m. (within 2%)
+- [x] Same θ at high speed → board washes out (grip limit reached) instead of turning tighter. (R = v²/μg, within 3%)
 - [x] Humanoid in stance, held by PD only, slides straight down a gentle slope for a few seconds
       without the board/feet joints exploding. (~3 s on 3–5°, ~4 s on 15°; it then topples, it doesn't explode:
       braking pitches a forward-stance rider toeward, and catching that is the policy's job.)
