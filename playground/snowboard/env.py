@@ -671,6 +671,8 @@ class SnowboardEnv(CarveEnv):
             side = torch.where(torch.rand(n, device=self.device) < 0.5, -1.0, 1.0)
             edge = side * torch.asin((speed.square() / (g_n * 7.6)).clamp(max=0.9))
             self.cmd_hold[env_ids] = edge
+            if not self.cfg.edge_cmd_hold:  # stage 2: the timed command starts at the peak of this side, then flips
+                self.cmd_phase[env_ids] = side * math.pi / 2
         return heading + jitter, edge, velocity, zeros
 
 
