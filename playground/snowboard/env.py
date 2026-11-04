@@ -88,6 +88,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     edge_cmd: bool = False
     rew_edge_cmd = 6.0  # exp(-((θ - θ*) / σ)²)
     edge_cmd_sigma_deg = 12.0
+    edge_cmd_clean: bool = True  # × clean (no skid) on the tracking reward
     edge_cmd_amp_deg = (20.0, 50.0)  # level 0 -> 1
     edge_cmd_period_s = (4.6, 4.0)  # one full S (two edges, a turn every ~2 s), level 0 -> 1; ±15 % per episode
     edge_cmd_hold = 1.8  # trapezoid sharpness: clamp(hold · sin, -1, 1)
@@ -418,11 +419,11 @@ class SnowboardEnv(CarveEnv):
             theta = self.snow_info["edge_angle"] if self.snow_info else zeros
             e_cmd = theta - self.edge_command()
             # × clean: only while carving, not sliding sideways (a flat side slip held the speed and hit the fence)
-            # × edged: while the command asks for an edge (|θ*| > 10°), a flat board earns nothing (riding flat and
-            # straight down the fall line collected partial credit); full from |θ| ≥ 20°, the base crossing stays free
-            edged = torch.where(self.edge_command().abs() > math.radians(10.0),
-                                ((theta.abs() - math.radians(10.0)) / math.radians(10.0)).clamp(0.0, 1.0), torch.ones_like(theta))
-            r = (cfg.rew_edge_cmd * torch.exp(-(e_cmd / math.radians(cfg.edge_cmd_sigma_deg)).square()) * clean * edged
+            # × edged: a flat board earns nothing, ever (riding flat and straight collected the base-crossing credit);
+            # full from |θ| ≥ 20°. The reward is earned on the edges; the crossing between them is just the way across.
+            edged = ((theta.abs() - math.radians(10.0)) / math.radians(10.0)).clamp(0.0, 1.0)
+            gate = clean if cfg.edge_cmd_clean else torch.ones_like(clean)
+            r = (cfg.rew_edge_cmd * torch.exp(-(e_cmd / math.radians(cfg.edge_cmd_sigma_deg)).square()) * gate * edged
                  * self.step_dt)
             reward += r
             self._track("rew_edge_cmd", r)
