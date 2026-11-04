@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from playground.quadruped.common import make_env
+from playground.quadruped.common import make_env, parse_overrides
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
@@ -27,6 +27,8 @@ p.add_argument("--slope", type=float, default=15.0)
 p.add_argument("--period", type=float, default=4.0, help="full S [s] (a turn every period / 2)")
 p.add_argument("--seconds", type=float, default=12.0)
 p.add_argument("--reps", type=int, default=4)
+p.add_argument("--pattern", choices=["roll", "flex"], default="flex")
+p.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE", help="env cfg overrides")
 p.add_argument("--scale", type=float, default=None, help="action_scale override (env default 0.25)")
 add_launcher_args(p)
 args = p.parse_args()
@@ -36,9 +38,13 @@ import torch
 
 import isaaclab.sim as sim_utils
 
-LAT = ["right_hip_x", "left_hip_x", "right_ankle_x", "left_ankle_x", "abdomen_x"]
-TOE = (1, -1, -1, -1, -1)  # reach test: +80.7°
-HEEL = (-1, -1, 1, -1, -1)  # reach test: -78.9°
+PATTERNS = {
+    # the reach test's max lateral patterns: they reached ±80° mostly by falling over, they don't steer the edge
+    "roll": (["right_hip_x", "left_hip_x", "right_ankle_x", "left_ankle_x", "abdomen_x"],
+             (1, -1, -1, -1, -1), (-1, -1, 1, -1, -1)),
+    # scripts/edge_sweep.py: in the posi-posi stance, ankle flex and knee bend tip the board (+1 -> heel edge)
+    "flex": (["left_ankle_y", "left_knee", "right_ankle_y", "right_knee"], (-1, -1, -1, -1), (1, 1, 1, 1)),
+}
 AMPS = (20.0, 35.0, 50.0)
 GAINS = (1.0, 2.0, 4.0, 100.0)
 
@@ -50,6 +56,8 @@ with launch_simulation(sim_utils.SimulationCfg(), args):
           "slope_deg": args.slope, "episode_length_s": args.seconds + 5, "start_heading_deg": 0.0}
     if args.scale:
         ov["action_scale"] = args.scale
+    ov |= parse_overrides(args.set)
+    LAT, TOE, HEEL = PATTERNS[args.pattern]
     raw = make_env(SnowboardEnv, SnowboardEnvCfg(task="carve"), ov, len(combos), sim_utils.SimulationCfg(), "true")
     names = [raw.robot.joint_names[i] for i in raw.actuated.tolist()]
     idx = torch.tensor([names.index(n) for n in LAT], device=raw.device)
@@ -92,7 +100,7 @@ with launch_simulation(sim_utils.SimulationCfg(), args):
         alive = alive & ~(term | trunc)
 
     steps = (up / raw.step_dt).clamp_min(1)
-    print(f"\n[bang] slope {args.slope}°, S period {args.period} s, {args.seconds} s max; mean over {args.reps} envs each")
+    print(f"\n[bang] pattern {args.pattern}, overrides {parse_overrides(args.set)}, slope {args.slope}°, S period {args.period} s, {args.seconds} s max; mean over {args.reps} envs each")
     print("[bang]  amp°  gain  up_s  flips  err°  speed  vmax  slip°   (flips = edge changes ≥15° to ≥15°)")
     for a_deg, k in itertools.product(AMPS, GAINS):
         m = torch.tensor([c == (a_deg, k) for c in combos], device=raw.device)
