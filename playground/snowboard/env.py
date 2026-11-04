@@ -252,8 +252,10 @@ class SnowboardEnv(CarveEnv):
         """Commanded signed edge angle [rad] (θ < 0 heel, > 0 toe), `ahead_s` seconds from now (0 if off)."""
         if not self.cfg.edge_cmd:
             return torch.zeros(self.num_envs, device=self.device)
-        if self.cfg.edge_cmd_hold:
-            return self.cmd_hold
+        if self.cfg.edge_cmd_hold:  # the held side, at the edge that balances the current speed (it changes in a turn)
+            g_n = 9.81 * math.cos(math.radians(self.slope_deg))
+            balanced = torch.asin((self.board_speed().square() / (g_n * 7.6)).clamp(max=0.9))
+            return torch.sign(self.cmd_hold) * balanced
         lv, cfg = self.cmd_level, self.cfg
         amp = math.radians(cfg.edge_cmd_amp_deg[0] + lv * (cfg.edge_cmd_amp_deg[1] - cfg.edge_cmd_amp_deg[0]))
         t = self.episode_length_buf.float() * self.step_dt + ahead_s
