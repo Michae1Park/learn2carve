@@ -22,7 +22,7 @@ its rhythm) is *learned*: it comes out of the physics of speed, slope, edge angl
 |---|---|
 | Path heading | $\psi = \operatorname{atan2}(v_y, v_x)$: travel direction, 0 = straight down the fall line |
 | Slip angle | $\beta = \operatorname{atan2}(v_\perp, v_\parallel)$: angle between the board's axis and its travel |
-| **Linked turn** | $\psi$ crosses the fall line after swinging $\lvert\psi\rvert \ge 45°$ to one side: a real turn, across the hill |
+| **Linked turn** | $\psi$ crosses the fall line after swinging $\lvert\psi\rvert \ge 80°$ to one side: a big fat S, each turn finished nearly across the hill |
 
 **Why turns emerge.** Training runs on a **15° slope**. Going straight down it runs to ~24 m/s ([snow model §4](SNOW_MODEL.md)). Commanded
 8–11 m/s and capped at 12 m/s, the rider must spend part of each turn heading across the hill, where gravity pulls less. How far across,
@@ -59,7 +59,7 @@ Each episode draws its own S, so no single shape is learned. Play and evaluation
 | | Last action |
 | | Task (16): speed and command, $\psi$, $\beta$, board yaw, position between the fences, turn side, swing so far, time since the last turn, $\beta^*$, guide heading error and fade |
 | **Action** | Joint targets around the stance (see [humanoid model §5](HUMANOID_MODEL.md#5-actions--joint-targets)), 30 Hz |
-| **Done** | Pelvis below 0.45 m (**fell**), board past a fence at ±20 m (**fence**), or 12 s (**time-out**) |
+| **Done** | **Fell**: pelvis below 0.20 m above the snow, or torso tilted > 80° from the snow normal, or pelvis < 0.12 m above the board, or the board past 85° of edge (on its side): room for the deep carves in `reference-image/`, not for lying down. **Fence**: board past ±20 m. Or 12 s (**time-out**) |
 | **Start** | Side slip: at rest on the heel edge, CoM above it. Turns: piste centre, heading within ±20° of the fall line, at the commanded speed |
 
 | Model | DoF (actuated) | Observation | Action |
@@ -79,14 +79,17 @@ $$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{turn}}\,\mathbb{1}[\text{turn}] \
 | Alive | 1 while up | 1.0 |
 | **Speed** | $\exp\!\big(-((\lVert v\rVert - v^*)/5)^2\big)$, $v^* \sim U(8, 11)$ m/s | 2.0 |
 | **Speed cap** | $\operatorname{clip}\big((\lVert v\rVert - 12)/2,\ 0,\ 1\big)$: forces turns finished across the hill | −3.0 |
-| **Carve** | $\underbrace{\operatorname{clip}(\lvert\theta\rvert/40°)}_{\text{edged}} \cdot \underbrace{\operatorname{clip}(\lvert\dot\psi_{\text{board}}\rvert/0.5\text{ rad/s})}_{\text{turning}} \cdot \underbrace{e^{-(\beta/15°)^2}}_{\text{clean}}$: full at 40° and up | 2.0 |
-| **Turn** | +1 per linked turn (≥45° swing): links the turns | 1.0 |
+| **Carve** | $\underbrace{\operatorname{clip}(\lvert\theta\rvert/40°)}_{\text{edged}} \cdot \underbrace{\operatorname{clip}(\lvert\dot\psi_{\text{board}}\rvert/0.5\text{ rad/s})}_{\text{turning}} \cdot \underbrace{e^{-(\beta/15°)^2}}_{\text{clean}} \cdot (0.5 + 0.5\,\text{low})$: full at 40° and up | 2.0 |
+| **Low** | Pelvis 0.30–0.45 m above the board, always: never stand up (0 at 0.55 m), never lie down (0 at 0.15 m) | 1.0 |
+| **Turn** | At each fall-line crossing: $\operatorname{clip}\big((\text{swing} - 30°)/(85° - 30°),\ 0,\ 1\big)$: deeper turns pay more, full at 85° | 1.0 |
 | **Fall** | Once, a fall or a fence | −10 |
 | Guide | $e^{-((\psi - \psi_{\text{guide}})/30°)^2}$ × adaptive fade | 4.0 → 0 |
 | Action rate | $\lVert a_t - a_{t-1} \rVert^2$ | −0.01 |
 
-**One carve term instead of five.** Edged, turning and clean multiply: tipped but riding straight, turning on a flat
-board, or skidding each earn about nothing. Posture (how low, which way the chest faces, angulation) is **not
+**A good carve** = low, steep edge, no skid, turns finished nearly across the hill: that is the reward, and nothing
+else. Edged, turning and clean multiply in one carve term: tipped but riding straight, turning on a flat board, or
+skidding each earn about nothing. Low is rewarded throughout (a rider never stands up fully) and counts double while
+carving. The rest of the technique (which way the chest faces, angulation, how hard to press when) is **not
 rewarded**: if a 40° carve needs it, the policy finds it, or a style reward learned from a real rider (Stage 3's AMP)
 adds it. An earlier version had 17 terms, including upright, low, facing, angulation and pose; it hand-designed the
 technique, its terms fought each other (pose pulled toward the stance, low pulled away), and each one was gamed.
@@ -107,6 +110,7 @@ flexion 2, spine 5, arms 8.
 | Cap 12 m/s, fall −30 | Learned to **ride flat**: edge angle 18° → 4°, straight at 13 m/s taking the cap penalty. No edge, no sidecut turn; −30 made trying to edge too costly | **Edge reward**; fall −10; guide weight 4 |
 | A turn = a 15° swing | Learned to turn (edge 17–19°, 0 falls) but **gamed the turn bonus**: ±15° wiggles every 0.7 s (14–16 "turns" per 10 s), still 5 m/s over the command | A turn needs a **45°** swing |
 | Guide faded on a fixed schedule | Every try: the guide was gone before the policy could ride, so the turn was never learned (baseline: 0 real turns at 70%) | **Adaptive guide**: fades only while followed |
+| Low always rewarded; fall = pelvis below 0.45 m only | **Lay on the snow with the board on its side** (edge 70–100°, pelvis 0–0.2 m above the board) and **spun in place** at 2.6 m/s for carve and turn reward; the fall check never fired | Falls also catch lying (torso > 80°), sitting (< 0.12 m) and a board on its side (> 85°); carve and turns need speed (> 4–5 m/s) |
 | Edge + angulation + low, ungated | **Leaned back onto the heel edge** (65° edge, pelvis 0.4 m, body near horizontal) and rode a straight diagonal into the fence: full edge, angulation and low reward, no turn | Edge and angulation pay only while the board turns; low has a floor |
 
 ## 4. PPO
@@ -131,6 +135,17 @@ flexion 2, spine 5, arms 8.
 A deterministic policy (mean action) rides **fixed, repeatable runs**: same start (piste centre, straight down),
 middle of the speed range, 100 m long (25 m for side slip). Each run prints turns and metres per turn. Each run prints one line of stats, and the longest one is saved
 as `trail.png` + `ride.csv`. `--record` films it for the README.
+
+**Signs of a good carve** (`scripts/eval_runs.py`): low is rewarded; these are only measured, to see whether they
+emerge.
+
+| Sign | Metric |
+|---|---|
+| Quick edge change | `edge_change_s`: time from 20° on one edge to 20° on the other |
+| Above a certain speed | `speed_err` against the 8–11 m/s command |
+| Press in the turn, release at the edge change | `press_turn` vs `press_change`: load $N/mg$ while turning hard vs while flat |
+| Facing forward, shoulders open | `facing`: chest toward the travel direction (cos) |
+| Hips folded, never fully released | `hip_flex_deg` (mean) and `hip_flex_min_deg` (least folded) |
 
 ## 6. Learning curves (baseline)
 

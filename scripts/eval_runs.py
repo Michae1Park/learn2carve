@@ -11,6 +11,14 @@ they were trained on. Per run: --episodes complete episodes over --num_envs envs
     carve_frac       of the time spent turning (|heading| > 15°), the share on a clean edge (|slip| < 5°)
     edge_deg         mean |edge angle| while turning: how hard the board is tipped
     speed_err        mean |speed - command| [m/s]
+
+  Signs of a good carve (only "low" is in the reward; the rest should emerge):
+    pelvis_m         mean pelvis height above the board (stance 0.80; low = 0.30-0.45)
+    edge_change_s    mean time from 20° on one edge to 20° on the other: a quick edge change
+    press_turn       mean load on the board N / mg while turning hard (|yaw rate| > 0.3 rad/s): the press
+    press_change     ... and while changing edges (|edge| < 5°): the release
+    facing           chest toward the travel direction, mean cos (1 = facing forward)
+    hip_flex_deg     mean hip flexion (both hips, pitch); hip_flex_min_deg: the least folded it gets
 """
 
 import argparse
@@ -41,9 +49,12 @@ import yaml
 
 import isaaclab.sim as sim_utils
 
-METRICS = ("fell", "fence", "turns_per_10s", "slip_deg", "carve_frac", "edge_deg", "speed_err", "seconds")
+METRICS = ("fell", "fence", "turns_per_10s", "slip_deg", "carve_frac", "edge_deg", "speed_err", "seconds",
+           # good carve, not rewarded except low: are they learned?
+           "pelvis_m", "edge_change_s", "press_turn", "press_change", "facing", "hip_flex_deg", "hip_flex_min_deg")
 
 
+@torch.inference_mode()  # the env's tensors are inference tensors; keep every stat in the same mode
 def evaluate(run_dir: Path, sim_cfg) -> dict:
     from playground.snowboard.env import SnowboardEnv, SnowboardEnvCfg
 
@@ -53,7 +64,13 @@ def evaluate(run_dir: Path, sim_cfg) -> dict:
                    args.suppress_warnings)
     env, agent = load_policy(raw, run, run_dir, args.checkpoint, cfg_dir=HERE)
     n, dev = raw.num_envs, raw.device
-    acc = {k: torch.zeros(n, device=dev) for k in ("steps", "slip", "edge_turn", "turn_steps", "carve_steps", "speed")}
+    keys = ("steps", "slip", "edge_turn", "turn_steps", "carve_steps", "speed", "pelvis", "facing", "hip", "press_turn",
+            "press_turn_n", "press_change", "press_change_n", "edge_changes", "edge_change_t")
+    acc = {k: torch.zeros(n, device=dev) for k in keys}
+    hip_min = torch.full((n,), 1e9, device=dev)
+    edge_side = torch.zeros(n, device=dev)  # last edge held past 20°: -1 / +1
+    edge_left = torch.zeros(n, device=dev)  # step it was last past 20° on that side
+    hips = [raw.robot.joint_names.index(j) for j in ("right_hip_y", "left_hip_y")]
     done_rows = []
     obs, _ = env.reset()
     t = 0
@@ -74,6 +91,28 @@ def evaluate(run_dir: Path, sim_cfg) -> dict:
         acc["turn_steps"] += (turning & live).float()
         acc["carve_steps"] += (turning & live & (raw.slip_angle().abs() < math.radians(5))).float()
         acc["edge_turn"] += raw.snow_info["edge_angle"].abs().rad2deg() * (turning & live)
+        # signs of a good carve
+        info, tech = raw.snow_info, raw._technique()
+        theta = info["edge_angle"]
+        press = info["normal_force"] / (9.81 * raw.snow.system_mass)
+        hard_turn = (raw.body_ang_vel(raw.board_id)[:, 2].abs() > 0.3) & live
+        changing = (theta.abs() < math.radians(5)) & live
+        acc["pelvis"] += raw.pelvis_height() * live
+        acc["facing"] += tech["facing"] * live
+        flex = raw.robot.data.joint_pos.torch[:, hips].abs().mean(-1).rad2deg()
+        acc["hip"] += flex * live
+        hip_min = torch.where(live, torch.minimum(hip_min, flex), hip_min)
+        acc["press_turn"] += press * hard_turn
+        acc["press_turn_n"] += hard_turn.float()
+        acc["press_change"] += press * changing
+        acc["press_change_n"] += changing.float()
+        side = torch.sign(theta) * (theta.abs() > math.radians(20))
+        switched = (side != 0) & (edge_side != 0) & (side != edge_side) & live
+        acc["edge_changes"] += switched.float()
+        acc["edge_change_t"] += (t - edge_left) * raw.step_dt * switched
+        held = (side != 0) & live
+        edge_left = torch.where(held, torch.full_like(edge_left, t), edge_left)
+        edge_side = torch.where(held, side, edge_side)
         for i in done.nonzero().flatten().tolist():
             steps = max(acc["steps"][i].item(), 1.0)
             seconds = steps * raw.step_dt
@@ -87,9 +126,17 @@ def evaluate(run_dir: Path, sim_cfg) -> dict:
                 "edge_deg": acc["edge_turn"][i].item() / turn_steps,
                 "speed_err": acc["speed"][i].item() / steps,
                 "seconds": seconds,
+                "pelvis_m": acc["pelvis"][i].item() / steps,
+                "edge_change_s": acc["edge_change_t"][i].item() / max(acc["edge_changes"][i].item(), 1.0),
+                "press_turn": acc["press_turn"][i].item() / max(acc["press_turn_n"][i].item(), 1.0),
+                "press_change": acc["press_change"][i].item() / max(acc["press_change_n"][i].item(), 1.0),
+                "facing": acc["facing"][i].item() / steps,
+                "hip_flex_deg": acc["hip"][i].item() / steps,
+                "hip_flex_min_deg": hip_min[i].item(),
             })
             for v in acc.values():
                 v[i] = 0.0
+            hip_min[i], edge_side[i] = 1e9, 0.0
     env.close()
     rows = done_rows[: args.episodes]
     summary = {k: sum(r[k] for r in rows) / len(rows) for k in METRICS}

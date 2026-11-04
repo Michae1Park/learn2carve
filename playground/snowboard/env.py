@@ -44,7 +44,9 @@ class SnowboardEnvCfg(CarveEnvCfg):
     speed_cmd = (0.5, 2.5)  # m/s, sampled per episode (turn tasks: see __post_init__)
     # a turn counts once the path swung this far to one side and crossed back over the fall line. 15° was gamed:
     # ±15° wiggles every 0.7 s collected the bonus without slowing down; 45° is a real turn, across the hill
-    min_turn_deg = 45.0
+    min_turn_deg = 80.0  # a big fat S: each turn finishes nearly across the hill (45 still rode a narrow S)
+    turn_bonus_from_deg = 30.0  # the turn bonus ramps from here ...
+    turn_bonus_full_deg = 85.0  # ... to full here, so deeper turns always pay more and early half-turns still teach
     skid_slip_deg = 20.0  # skid: slip angle to hold
     start_heading_deg = 20.0  # turn tasks: start heading sampled in ± this from the fall line
     fence_half_width = FENCE_HALF_WIDTH  # m; crossing it ends the episode
@@ -72,8 +74,12 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_speed = 2.0  # exp(-((|v| - v_cmd) / σ_v)²): the reason to turn
     rew_speed_cap = -3.0  # × clip((|v| - speed_cap) / 2, 0, 1): over the cap is clearly worse than turning
     speed_cap = 12.0  # m/s; a clean carve on 15° settles at ~19-21 m/s, so the cap forces turns finished across the hill
-    rew_carve = 2.0  # turn tasks: edged × turning × clean = clip(|θ|/edge_target) · clip(|ψ̇_board|/0.5) · exp(-(β/σ)²)
+    # carve: edged × turning × clean × low = clip(|θ|/edge_target) · clip(|ψ̇_board|/0.5) · exp(-(β/σ)²) · (0.5 + 0.5 low)
+    fall_height = 0.20  # pelvis above the snow [m]: a deep carve puts the hips within ~0.3 m of it (was 0.45)
+    rew_carve = 2.0
     edge_target_deg = 20.0  # full carve credit at or above this edge angle. Carve: 40 (see __post_init__)
+    rew_low = 1.0  # turn tasks, always: pelvis 0.30–0.45 m above the board; never stand up (0 at 0.55 m), never lie
+                   # down (0 at 0.15 m: an ungated version was gamed by leaning back)
     rew_slip = 2.0  # skid / side slip only (the carve term covers slip for carving): exp(-(slip error / σ_slip)²)
     rew_heading = 2.0  # side slip only: exp(-(heading / σ)²), straight down the fall line
     rew_turn = 1.0  # per completed turn (turn tasks): links the turns
@@ -112,6 +118,7 @@ class SnowboardEnv(CarveEnv):
         self.last_turns = torch.zeros(n, device=dev)  # turns of each env's previous episode (read after a reset)
         self.since_turn = torch.zeros(n, device=dev)  # s since the last completed turn (or the start)
         self.turn_done = torch.zeros(n, dtype=torch.bool, device=dev)  # a turn completed this step
+        self.turn_credit = torch.zeros(n, device=dev)  # its bonus, 0..1 by how deep it swung
         self.guide_k = torch.zeros(n, device=dev)  # 2π / λ of this episode's guide [1/m]
         self.guide_y = torch.zeros(n, device=dev)  # its swing Y [m]
         self.guide_phase = torch.zeros(n, device=dev)
@@ -190,7 +197,10 @@ class SnowboardEnv(CarveEnv):
         psi = self.path_heading()
         side = torch.sign(psi) * (psi.abs() > 0.02)
         crossed = (side != 0) & (self.turn_side != 0) & (side != self.turn_side)
-        self.turn_done = crossed & (self.turn_swing >= self.min_turn)
+        crossed = crossed & (self.board_speed() > 5.0)  # a turn at speed: spinning in place doesn't count
+        self.turn_done = crossed & (self.turn_swing >= self.min_turn)  # counted (turns_per_10s, eval)
+        lo, hi = math.radians(self.cfg.turn_bonus_from_deg), math.radians(self.cfg.turn_bonus_full_deg)
+        self.turn_credit = crossed.float() * ((self.turn_swing - lo) / (hi - lo)).clamp(0.0, 1.0)  # rewarded
         self.turn_count += self.turn_done.float()
         self.since_turn = torch.where(self.turn_done, torch.zeros_like(self.since_turn), self.since_turn + self.step_dt)
         new_side = torch.where(side != 0, side, self.turn_side)
@@ -218,6 +228,14 @@ class SnowboardEnv(CarveEnv):
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         fallen, time_out = super()._get_dones()
+        # also fallen: lying on the snow with the board on its side was never caught by the pelvis-height check (the
+        # board's edge held the pelvis above 0.45 m), and the policy learned to lie there and spin for carve reward
+        torso_up = quat_apply(self.body_quat(self.torso_id), self.up.expand(self.num_envs, 3))
+        # thresholds leave room for deep carves (reference-image/): torso inclined ~60-70°, hips just above the snow
+        lying = (torso_up * self.up).sum(-1) < math.cos(math.radians(80.0))
+        sitting = self.pelvis_height() < 0.12  # below the low band (0.30-0.45 m, reward 0 at 0.15)
+        on_side = self.snow_info["edge_angle"].abs() > math.radians(85.0) if self.snow_info else torch.zeros_like(lying)
+        fallen = fallen | lying | sitting | on_side
         x, y = self.position().unbind(-1)
         self.out_of_bounds = y.abs() > self.cfg.fence_half_width
         if self.cfg.run_length is not None:
@@ -238,14 +256,18 @@ class SnowboardEnv(CarveEnv):
             "speed_cap": ((speed - cfg.speed_cap) / 2.0).clamp(0.0, 1.0),
             # edged, turning and clean at once: tipped but straight (leaning back into the fence), or turning flat, or
             # skidding, all earn ~0
+            # × (0.5 + 0.5 low): being low pays only while carving (a low crouch riding straight earns nothing), and
+            # carving tall still earns half, so the squat isn't required before the carve can be learned
+            # × moving: no carve credit below ~4 m/s, full from 8 (spinning in place earned it before)
             "carve": (edge / math.radians(cfg.edge_target_deg)).clamp(0.0, 1.0) * self.turning() * clean
-            if cfg.task == "carve" else zeros,
+            * (0.5 + 0.5 * self.low()) * ((speed - 4.0) / 4.0).clamp(0.0, 1.0) if cfg.task == "carve" else zeros,
+            "low": self.low() if turns else zeros,
             "slip": zeros if cfg.task == "carve" else torch.exp(-(e_slip / math.radians(cfg.sigma_slip_deg)).square()),
             "heading": zeros if turns else torch.exp(-(psi / math.radians(cfg.sigma_heading_deg)).square()),
             "action_rate": (self.actions - self.prev_actions).square().sum(-1),
         }
         if turns:
-            self._technique()  # logged only (pelvis height, angulation), not rewarded
+            self._technique()  # logged only (pelvis height, angulation)
         reward = torch.zeros(self.num_envs, device=self.device)
         for name, value in terms.items():
             r = getattr(cfg, f"rew_{name}") * value * self.step_dt
@@ -265,7 +287,7 @@ class SnowboardEnv(CarveEnv):
             self._track("err_guide_deg", e_guide.abs().rad2deg())
             self._adapt_guide(e_guide.abs().rad2deg())
         if turns:  # a bonus per completed turn, not a rate
-            r = cfg.rew_turn * self.turn_done.float()
+            r = cfg.rew_turn * self.turn_credit
             reward += r
             self._track("rew_turn", r)
 
@@ -277,6 +299,16 @@ class SnowboardEnv(CarveEnv):
         self._track("edge_abs_deg", self.snow_info["edge_angle"].abs().rad2deg() if self.snow_info
                     else torch.zeros_like(speed))
         return reward
+
+    def pelvis_height(self) -> torch.Tensor:
+        """Pelvis above the board along the snow normal [m] (stance 0.80)."""
+        return self.body_pos(self.pelvis_id)[:, 2] - self.body_pos(self.board_id)[:, 2]
+
+    def low(self) -> torch.Tensor:
+        """0..1: full with the pelvis 0.30–0.45 m above the board (hips near the snow, as in a deep carve), 0 at
+        0.55 m and above (upright) and at 0.15 m (lying)."""
+        h = self.pelvis_height()
+        return ((0.55 - h) / 0.10).clamp(0.0, 1.0) * ((h - 0.15) / 0.15).clamp(0.0, 1.0)
 
     def turning(self) -> torch.Tensor:
         """0..1: how hard the board is turning, from its yaw rate about the snow normal (full at 0.5 rad/s)."""
@@ -290,8 +322,7 @@ class SnowboardEnv(CarveEnv):
         ey = torch.tensor([0.0, 1.0, 0.0], device=self.device).expand(n, 3)
         up = self.up.expand(n, 3)
         height = self.body_pos(self.pelvis_id)[:, 2] - self.body_pos(self.board_id)[:, 2]
-        # full in 0.55–0.70 m (stance 0.80), falling off below: low, not lying down
-        low = ((self.pelvis_in_board_pos[2] - height) / 0.10).clamp(0.0, 1.0) * ((height - 0.40) / 0.15).clamp(0.0, 1.0)
+        low = self.low()
 
         chest = quat_apply(self.body_quat(self.torso_id), ex)  # the humanoid faces its torso's +x
         chest = chest - (chest * up).sum(-1, keepdim=True) * up
