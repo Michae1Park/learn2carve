@@ -80,6 +80,12 @@ class SnowboardEnvCfg(CarveEnvCfg):
     edge_target_deg = 20.0  # full carve credit at or above this edge angle. Carve: 40 (see __post_init__)
     rew_low = 1.0  # turn tasks, always: pelvis 0.30–0.45 m above the board, ramping up from the 0.80 m stance; never sit
                    # down (0 at 0.12 m: an ungated version was gamed by leaning back)
+    rew_traverse = -3.0  # turn tasks: no completed turn for traverse_after_s: per second, ramping to full over traverse_ramp_s
+    traverse_after_s = 3.0
+    traverse_ramp_s = 3.0
+    rew_height = 1.0  # turn tasks: pelvis height follows the edge, tall (0.50 m) at the edge change, 0.25 m at 45° and up
+    height_sigma = 0.10
+    rew_arm = 0.5  # turn tasks: one hand low, the other high (the outside arm lifts for balance) while edged
     rew_hand = 1.0  # turn tasks: the lowest hand near the snow while edged (the hand drags at the apex, hangs low at the edge change)
     hand_scale = 0.30  # m: exp(-(lowest hand height / scale)²) × clip(edge / edge_target)
     rew_straight = -3.0  # turn tasks: riding straight down the fall line, exp(-(heading / straight_sigma)²), costs this per second
@@ -88,7 +94,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_hip = 1.0  # turn tasks: the folded L from head to knee: torso-thigh angle 180° (straight) -> 0, 45° or tighter -> 1
     rew_slip = 2.0  # skid / side slip only (the carve term covers slip for carving): exp(-(slip error / σ_slip)²)
     rew_heading = 2.0  # side slip only: exp(-(heading / σ)²), straight down the fall line
-    rew_turn = 1.0  # per completed turn (turn tasks): links the turns
+    rew_turn = 5.0  # per completed turn (turn tasks): links the turns
     rew_fall = -10.0  # once, when the episode ends in a fall or past a fence
     rew_guide = 4.0  # exp(-(heading - guide heading)² / σ²) × fade (turn tasks, adaptive, see guide_fade)
     rew_action_rate = -0.01
@@ -273,6 +279,11 @@ class SnowboardEnv(CarveEnv):
             "hand": ((edge / math.radians(cfg.edge_target_deg)).clamp(0.0, 1.0)
                      * torch.exp(-(self.body_pos(self.key_ids[:2])[..., 2].min(-1).values / cfg.hand_scale).square())
                      if turns else zeros),
+            "traverse": ((self.since_turn - cfg.traverse_after_s) / cfg.traverse_ramp_s).clamp(0.0, 1.0) if turns else zeros,
+            "height": (torch.exp(-((self.pelvis_height() - (0.50 - 0.25 * (edge / math.radians(45.0)).clamp(0.0, 1.0)))
+                                   / cfg.height_sigma).square()) if turns else zeros),
+            "arm": (((lambda hz: (hz.max(-1).values - hz.min(-1).values) / 0.5)(self.body_pos(self.key_ids[:2])[..., 2]))
+                    .clamp(0.0, 1.0) * (edge / math.radians(cfg.edge_target_deg)).clamp(0.0, 1.0) if turns else zeros),
             "straight": torch.exp(-(psi / math.radians(cfg.straight_sigma_deg)).square()) if turns else zeros,
             "hip": self.hip_fold() if turns else zeros,
             "slip": zeros if cfg.task == "carve" else torch.exp(-(e_slip / math.radians(cfg.sigma_slip_deg)).square()),
