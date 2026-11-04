@@ -84,6 +84,7 @@ $$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{turn}}\,\mathbb{1}[\text{turn}] \
 | **Traverse** | clip$\big((t_{\text{since turn}} - 3\,\text{s})/3\,\text{s},\ 0,\ 1\big)$: no completed turn for a while | −3.0 |
 | **Height** | $e^{-((h - h^*)/0.1)^2}$, $h^* = 0.50 - 0.25\operatorname{clip}(\lvert\theta\rvert/45°)$: tall at the edge change, low at the apex | 1.0 |
 | **Arm** | the two hands' height difference / 0.5 m × edge: one hand low, one high | 0.5 |
+| **Bow** | torso inclination from the snow normal / (45° + 20° × edge fraction), 0 by 80° (lying): the upper body bows down toward the apex | 1.0 |
 | **Carve** | $\underbrace{\operatorname{clip}(\lvert\theta\rvert/40°)}_{\text{edged}} \cdot \underbrace{\operatorname{clip}(\lvert\dot\psi_{\text{board}}\rvert/0.5\text{ rad/s})}_{\text{turning}} \cdot \underbrace{e^{-(\beta/15°)^2}}_{\text{clean}} \cdot (0.5 + 0.5\,\text{low})$: full at 40° and up | 2.0 |
 | **Low** | Pelvis above the board, always: ramps from 0 at the 0.80 m stance to full at 0.45 m (full to 0.25 m), never sit down (0 at 0.12 m) | 1.0 |
 | **Turn** | At each fall-line crossing: $\operatorname{clip}\big((\text{swing} - 30°)/(85° - 30°),\ 0,\ 1\big)$: deeper turns pay more, full at 85° | 5.0 |

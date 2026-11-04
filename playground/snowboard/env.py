@@ -85,6 +85,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     traverse_ramp_s = 3.0
     rew_height = 1.0  # turn tasks: pelvis height follows the edge, tall (0.50 m) at the edge change, 0.25 m at 45° and up
     height_sigma = 0.10
+    rew_bow = 1.0  # turn tasks: upper body bowed forward, torso inclined from the snow normal: 45° flat -> 65° at 45° edge; 0 by 80° (lying)
     rew_arm = 0.5  # turn tasks: one hand low, the other high (the outside arm lifts for balance) while edged
     rew_hand = 1.0  # turn tasks: the lowest hand near the snow while edged (the hand drags at the apex, hangs low at the edge change)
     hand_scale = 0.30  # m: exp(-(lowest hand height / scale)²) × clip(edge / edge_target)
@@ -279,6 +280,9 @@ class SnowboardEnv(CarveEnv):
             "hand": ((edge / math.radians(cfg.edge_target_deg)).clamp(0.0, 1.0)
                      * torch.exp(-(self.body_pos(self.key_ids[:2])[..., 2].min(-1).values / cfg.hand_scale).square())
                      if turns else zeros),
+            "bow": (lambda incl: (incl / (math.radians(45.0) + math.radians(20.0) * (edge / math.radians(45.0)).clamp(0.0, 1.0)))
+                    .clamp(0.0, 1.0) * ((math.radians(80.0) - incl) / math.radians(10.0)).clamp(0.0, 1.0))(
+                self.torso_incline()) if turns else zeros,
             "traverse": ((self.since_turn - cfg.traverse_after_s) / cfg.traverse_ramp_s).clamp(0.0, 1.0) if turns else zeros,
             "height": (torch.exp(-((self.pelvis_height() - (0.50 - 0.25 * (edge / math.radians(45.0)).clamp(0.0, 1.0)))
                                    / cfg.height_sigma).square()) if turns else zeros),
@@ -331,6 +335,11 @@ class SnowboardEnv(CarveEnv):
         apex of a deep carve), then 0 at 0.12 m (sitting). The ramp starts at the stance so a standing rider feels a gradient."""
         h = self.pelvis_height()
         return ((0.80 - h) / 0.35).clamp(0.0, 1.0) * ((h - 0.12) / 0.13).clamp(0.0, 1.0)
+
+    def torso_incline(self) -> torch.Tensor:
+        """Angle of the torso axis from the snow normal [rad]: 0 upright, ~80° is lying (a fall)."""
+        torso_up = quat_apply(self.body_quat(self.torso_id), self.up.expand(self.num_envs, 3))
+        return (torso_up * self.up).sum(-1).clamp(-1.0, 1.0).acos()
 
     def hip_fold(self) -> torch.Tensor:
         """0..1: the folded L from head to knee. The angle between the torso line (hip to head) and the thigh line
