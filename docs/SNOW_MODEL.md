@@ -1,82 +1,92 @@
 # Snow model
 
-> **TL;DR** PhysX can't carve: its friction is the same in every direction. `envs/snow.py` replaces it with
-> three forces taken from how a real board works: **glide**, **sidecut steering** and **edge grip**. Driven alone,
-> the model hits textbook numbers: **turn radius within 3%**, **terminal speed within 0.2 m/s**.
+PhysX friction is isotropic, so a board on it can't carve. `envs/snow.py` replaces it with three forces applied
+to the board each physics step (120 Hz): **glide**, **sidecut steering** and **edge grip**. Pure torch, batched over
+envs. Knobs: `config.yaml` → `snow`, `board`. SI units; angles in rad unless marked °.
 
-![Snow model validation: turn radius vs edge angle, and terminal speed vs slope, sim vs formula](snow/validation.png)
+Driven alone, the model matches closed-form physics: **turn radius within 3%**, **terminal speed within 0.2 m/s**.
 
-## The idea in one picture
+![Snow model: the edge angle drives glide, sidecut steering and edge grip; carve while grip holds the arc, skid past the limit](snow/forces.svg)
 
-```
-           edge angle θ  (the rider tips the board; the policy's only lever)
-                 │
-     ┌───────────┼─────────────────────────────┐
-     ▼           ▼                             ▼
-  1 GLIDE     2 SIDECUT                     3 GRIP
-  along the   board yaws onto an arc        sideways spring at the biting edge
-  board       of radius R·cos θ             holds the arc ... up to μ(θ)·N
-     │           │                             │
-     └──── carve: arc held, zero side slip ────┘
-           skid:  arc needs more grip than μ(θ)·N → edge slides
-```
+The policy never steers the board. It moves its body, the body tips the board to an edge angle $\theta$, and the
+snow does the rest.
 
-The policy never steers the board. It only moves its body. Tipping the board puts it on edge, and the snow
-does the rest, as with a real board.
+## Inputs
 
-## The three forces
+| Symbol | Meaning |
+|---|---|
+| $\theta$ | Edge angle: board roll relative to the snow surface |
+| $v_\parallel,\ v_\perp$ | Board velocity along / across its long axis |
+| $\omega$ | Board yaw rate about the snow normal |
+| $N$ | Normal force on the board |
+| $m$ | Rider + board mass |
 
-| # | Force | Formula | What it does |
-|---|---|---|---|
-| 1 | **Glide** | `F = −μ_glide · N` along the board, `−½ρ C_dA \|v\| v` air drag on the body | Sets top speed |
-| 2 | **Sidecut** | yaw rate → `v / (R_sc · cos θ)`, torque capped at `μ · N · L/4` | Tipped board turns on its arc |
-| 3 | **Grip** | sideways spring-damper at the edge, capped at `μ(θ) · N` | Holds the carve. Past the cap: skid |
+## 1. Glide
 
-Grip `μ(θ)` blends from **0.15 flat** (skids easily) to **1.5 on edge** (bites) over the first 15°.
+$$F_\parallel = -\mu_g N \tanh\!\left(\frac{v_\parallel}{0.1}\right) \qquad F_{\text{drag}} = -\tfrac{1}{2}\rho\, C_dA\, \lVert v \rVert\, v$$
 
-## Validation (`scripts/validate_snow.py`)
+Glide acts on the board. Drag acts on the rider's pelvis: through the feet it would pitch the rider forward.
 
-A planar rigid board (rider + board mass) is driven by the snow model alone, with no humanoid and no Isaac Sim. It's
-then compared against closed-form physics.
+## 2. Sidecut steering
 
-| Check | Formula | Sim vs formula |
-|---|---|---|
-| **Slow turn follows the sidecut** | `R = R_sc · cos θ` | 7.5 / 7.5 m at 10°, 5.4 / 5.4 m at 45° (6 m/s) |
-| **Fast turn opens up at the grip limit** | `R = v² / (μ g)` | 13.7 / 13.3 m at 14 m/s, any edge angle ≥ 15° |
-| **Terminal speed** | `v = √(2mg(sin α − μ cos α) / ρC_dA)` | 18.2 / 18.2 m/s on 10°, 23.6 / 23.6 m/s on 15° |
+On edge, the board yaws onto the arc its sidecut cuts, unless that arc needs more grip than the edge has:
 
-**Reading the left plot:**
-- **Blue (6 m/s):** slow enough that the edge never slips. Radius shrinks with edge angle, exactly as the sidecut says.
-- **Red (14 m/s):** too fast for any arc the board can hold. Radius is set by grip, not by edge angle.
-- **Green (10 m/s):** follows the sidecut up to ~25°, then hits the grip limit. This is the **carve → skid transition**.
+$$R(\theta) = R_{sc}\cos\theta \qquad \omega^* = -\operatorname{sign}(\theta)\,\frac{v_\parallel}{R(\theta)}\cdot h \qquad h = \min\!\left(1,\ \frac{\mu(\theta)\,N/m}{v_\parallel^2 / R(\theta)}\right)$$
 
-Unit tests (`tests/test_snow.py`) pin the same behaviour, plus signs and edge cases (flat board doesn't steer,
-airborne board has no grip).
+$$\tau = \operatorname{clip}\!\left(k_\omega(\omega^* - \omega),\ \pm\,\mu(\theta)\,N\,\frac{L}{4}\right)$$
 
-## Parameters (`config.yaml` → `snow`, `board`)
+- $h < 1$: the arc needs more than the edge can hold, so the turn opens to radius $v^2 / (\mu g)$.
+- $|\theta| < 3°$: no steering ($\omega^* = 0$). A flat board still resists pivoting, up to the friction torque.
+
+## 3. Edge grip
+
+A stick-slip ("bristle") spring at the biting edge, with $z$ its deflection carried between steps:
+
+$$z_{t} = z_{t-1} + v_\perp\,\Delta t \qquad F_\perp = \operatorname{clip}\!\left(-(k\,z_t + c\,v_\perp),\ \pm\,\mu(\theta)\,N\right)$$
+
+$$\mu(\theta) = \mu_{\text{flat}} + (\mu_{\text{edge}} - \mu_{\text{flat}})\cdot\operatorname{smoothstep}\!\left(\frac{|\theta|}{15°}\right)$$
+
+$$\textbf{carve: } |F_\perp| < \mu(\theta) N \qquad\qquad \textbf{skid: } |F_\perp| = \mu(\theta) N$$
+
+A spring, not a hard constraint: cancelling the slip in one step ($k \approx m/\Delta t$) shakes the light board end
+(~7 kg) and topples the rider.
+
+## Parameters
 
 | Parameter | Value | Source |
 |---|---|---|
-| Sidecut radius `R_sc` | 7.6 m | Real board: 289 / 246 / 289 mm widths over a 1.14 m edge |
-| Glide `μ_glide` | 0.05 | Waxed base on hardpack: 0.03–0.08 |
-| Grip `μ_flat` → `μ_edge` | 0.15 → 1.5 | Tuned: flat skids, edged holds ~1.5 g |
-| Air drag `C_dA` | 0.5 m² | Upright rider |
-| Mass | 67.7 kg | 65 kg rider + 2.7 kg board |
+| $R_{sc}$ | 7.6 m | Real board: 289 / 246 / 289 mm widths over a 1.14 m edge, $R \approx L^2 / 8d$ |
+| $\mu_g$ | 0.05 | Waxed base on hardpack: 0.03–0.08 |
+| $\mu_{\text{flat}} \to \mu_{\text{edge}}$ | 0.15 → 1.5 | Tuned: flat skids, edged holds ~1.5 g |
+| $C_dA$, $\rho$ | 0.5 m², 1.0 kg/m³ | Upright rider, resort altitude |
+| $k$, $c$ | $2\times10^4$ N/m, 800 N·s/m | Stable for the board end at 120 Hz |
+| $k_\omega$, $L$ | 50 N·m·s, 1.14 m | Yaw gain, effective edge |
+| $m$ | 67.7 kg | 65 kg rider + 2.7 kg board |
 
-## What it doesn't model
+## 4. Validation (`scripts/validate_snow.py`)
+
+A planar rigid board of mass $m$ is driven by the snow model alone (no humanoid, no Isaac Sim) and compared
+against closed form:
+
+$$R = \max\!\left(R_{sc}\cos\theta,\ \frac{v^2}{\mu(\theta)\,g}\right) \qquad v_{\text{term}} = \sqrt{\frac{2mg\,(\sin\alpha - \mu_g\cos\alpha)}{\rho\, C_dA}}$$
+
+![Snow model validation: turn radius vs edge angle, and terminal speed vs slope, sim vs formula](snow/validation.png)
+
+| Check | Sim / formula |
+|---|---|
+| **Slow turn follows the sidecut** (6 m/s) | 7.5 / 7.5 m at 10°, 5.4 / 5.4 m at 45° |
+| **Fast turn opens at the grip limit** (14 m/s) | 13.7 / 13.3 m, any $\theta \ge 15°$ |
+| **Carve → skid transition** (10 m/s) | Follows $R_{sc}\cos\theta$ to ~25°, then flat at $v^2/\mu g$ |
+| **Terminal speed** | 18.2 / 18.2 m/s on 10°, 23.6 / 23.6 m/s on 15° |
+
+`tests/test_snow.py` pins the same behaviour, plus signs and edge cases (a flat board doesn't steer, an airborne board
+has no grip).
+
+## Not modelled
 
 | Left out | Effect |
 |---|---|
-| Progressive sidecut (10.7 / 6.8 / 10.7 m) | One effective radius. Fore/aft weight shift doesn't change the arc |
-| Board flex, camber | No "pressing" the board into a tighter arc |
-| Snow conditions (powder, ice, ruts) | One groomed hardpack |
-| Real terrain | Physics is one tilted plane. The mountain is visual only |
-
-## Implementation notes
-
-- **Grip is a spring, not a hard constraint.** Cancelling the slip in one step (`m/dt`) shakes the light board and
-  topples the rider. The spring-damper is sized for the ~7 kg board end at 120 Hz.
-- **A flat board resists pivoting.** Without that, it spins up by itself and throws the rider.
-- **Drag acts on the body, not the board.** Through the feet it would pitch the rider forward.
-- **Every quantity is in the slope frame.** The model only needs the snow normal, so tilted terrain and tilted
-  gravity give identical results.
+| Progressive sidecut (10.7 / 6.8 / 10.7 m) | One radius: fore/aft weight shift doesn't change the arc |
+| Board flex, camber | No pressing the board into a tighter arc |
+| Snow conditions | One groomed hardpack: no powder, ice or ruts |
+| Terrain | Physics is one tilted plane; the mountain is visual only. Everything is in the slope frame, so tilted terrain and tilted gravity give identical results |

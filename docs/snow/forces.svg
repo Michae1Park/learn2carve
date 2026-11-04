@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440" viewBox="0 0 1200 440" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>Snow model: the edge angle drives glide, sidecut steering and edge grip; the board carves while grip holds the arc and skids past the limit</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#374151"/>
+    </marker>
+    <style>
+      .name { font-size: 24px; font-weight: 700; fill: #111827; }
+      .sub { font-size: 19px; fill: #374151; }
+      .tag { font-size: 17px; font-weight: 700; fill: #374151; }
+      .num { font-size: 18px; font-weight: 700; fill: #FFFFFF; }
+      .wire { stroke: #374151; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .input { fill: #F3F4F6; stroke: #9AA3AF; stroke-width: 2; }
+      .glide { fill: #EAF2FF; stroke: #2F6FDB; stroke-width: 2; }
+      .steer { fill: #FFF4E0; stroke: #D98A00; stroke-width: 2; }
+      .grip { fill: #F2ECFF; stroke: #7C4DDB; stroke-width: 2; }
+      .carve { fill: #E8F6EC; stroke: #2E9E50; stroke-width: 2; }
+      .skid { fill: #FDECEC; stroke: #D64545; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <!-- solid card: readable in GitHub's light and dark themes -->
+  <rect x="1" y="1" width="1198" height="438" rx="16" fill="#FFFFFF" stroke="#E5E7EB" stroke-width="2"/>
+
+  <!-- input -->
+  <rect x="24" y="172" width="220" height="96" rx="12" class="input"/>
+  <text x="44" y="212" class="name">Edge angle θ</text>
+  <text x="44" y="244" class="sub">policy tips the board</text>
+
+  <!-- 1 Glide -->
+  <rect x="304" y="40" width="300" height="96" rx="12" class="glide"/>
+  <circle cx="332" cy="72" r="16" fill="#2F6FDB"/><text x="332" y="78" class="num" text-anchor="middle">1</text>
+  <text x="358" y="80" class="name">Glide</text>
+  <text x="324" y="116" class="sub">friction + air drag → top speed</text>
+
+  <!-- 2 Sidecut -->
+  <rect x="304" y="172" width="300" height="96" rx="12" class="steer"/>
+  <circle cx="332" cy="204" r="16" fill="#D98A00"/><text x="332" y="210" class="num" text-anchor="middle">2</text>
+  <text x="358" y="212" class="name">Sidecut</text>
+  <text x="324" y="248" class="sub">yaws onto an arc R·cos θ</text>
+
+  <!-- 3 Grip -->
+  <rect x="304" y="304" width="300" height="96" rx="12" class="grip"/>
+  <circle cx="332" cy="336" r="16" fill="#7C4DDB"/><text x="332" y="342" class="num" text-anchor="middle">3</text>
+  <text x="358" y="344" class="name">Grip</text>
+  <text x="324" y="380" class="sub">edge spring, up to μ(θ)·N</text>
+
+  <!-- check -->
+  <rect x="664" y="172" width="236" height="96" rx="12" class="input"/>
+  <text x="684" y="212" class="name">Can grip hold</text>
+  <text x="684" y="244" class="sub">the arc? v²/R ≤ μg</text>
+
+  <!-- outcomes -->
+  <rect x="960" y="100" width="216" height="96" rx="12" class="carve"/>
+  <text x="980" y="140" class="name">Carve</text>
+  <text x="980" y="172" class="sub">thin line, no slip</text>
+
+  <rect x="960" y="244" width="216" height="96" rx="12" class="skid"/>
+  <text x="980" y="284" class="name">Skid</text>
+  <text x="980" y="316" class="sub">edge slides, wider arc</text>
+
+  <!-- wires -->
+  <path d="M244,220 L274,220 L274,88 L300,88" class="wire"/>
+  <path d="M244,220 L300,220" class="wire"/>
+  <path d="M274,220 L274,352 L300,352" class="wire"/>
+  <path d="M604,220 L660,220" class="wire"/>
+  <path d="M604,352 L632,352 L632,236 L660,236" class="wire"/>
+  <path d="M900,206 L930,206 L930,148 L956,148" class="wire"/>
+  <path d="M900,234 L930,234 L930,292 L956,292" class="wire"/>
+  <text x="916" y="132" class="tag">yes</text>
+  <text x="916" y="320" class="tag">no</text>
+</svg>
