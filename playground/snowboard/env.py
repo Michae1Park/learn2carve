@@ -131,6 +131,7 @@ class SnowboardEnv(CarveEnv):
         self.prev_edge = torch.zeros(n, device=dev)
         self.psi_rate = torch.zeros(n, device=dev)  # smoothed path heading rate [rad/s] (~0.3 s): chatter averages out
         self.edge_rate = torch.zeros(n, device=dev)  # edge angle rate [rad/s]
+        self.edge_ema = torch.zeros(n, device=dev)  # signed edge angle smoothed over ~0.6 s: chatter cancels, a held edge stays
         self.turn_side = torch.zeros(n, device=dev)  # side the path has swung to: -1, 0 (not yet), +1
         self.turn_swing = torch.zeros(n, device=dev)  # largest |heading| on that side so far [rad]
         self.turn_count = torch.zeros(n, device=dev)
@@ -221,6 +222,7 @@ class SnowboardEnv(CarveEnv):
         theta = self.snow_info["edge_angle"] if self.snow_info else torch.zeros_like(psi)
         self.edge_rate = torch.where(first, torch.zeros_like(psi), (theta - self.prev_edge) / self.step_dt)
         self.prev_edge = theta
+        self.edge_ema = torch.where(first, theta, 0.95 * self.edge_ema + 0.05 * theta)
         side = torch.sign(psi) * (psi.abs() > 0.02)
         crossed = (side != 0) & (self.turn_side != 0) & (side != self.turn_side)
         crossed = crossed & (self.board_speed() > 5.0)  # a turn at speed: spinning in place doesn't count
@@ -274,7 +276,7 @@ class SnowboardEnv(CarveEnv):
         speed, e_slip, psi = self.board_speed(), self.slip_error(), self.path_heading()
         turns = cfg.task != "sideslip"
         zeros = torch.zeros_like(speed)
-        edge = self.snow_info["edge_angle"].abs() if self.snow_info else zeros
+        edge = self.edge_ema.abs()  # the held edge: flipping it back and forth (chatter) averages out to nothing
         clean = torch.exp(-(self.slip_angle() / math.radians(cfg.sigma_slip_deg)).square())
         tech = self._technique() if turns else {}  # also logs pelvis height and angulation
         terms = {

@@ -87,7 +87,7 @@ $$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{turn}}\,\mathbb{1}[\text{turn}] \
 | **Swing** | $\operatorname{clip}(\lvert\psi\rvert/80°)\cdot\operatorname{clip}(\lvert\theta\rvert/40°)\cdot$ turning: heading across the hill while carving, the slope up to the turn bonus | 2.0 |
 | **Edge rate** | $\operatorname{clip}((\lvert\dot\theta\rvert - 2)/2,\ 0,\ 1)$: edge chatter (a fast flip bled speed without turning) | −2.0 |
 | **Bow** | torso inclination from the snow normal / (45° + 20° × edge fraction), 0 by 80° (lying): the upper body bows down toward the apex | 1.0 |
-| **Carve** | $\underbrace{\operatorname{clip}(\lvert\theta\rvert/40°)}_{\text{edged}} \cdot \underbrace{\operatorname{clip}(\lvert\dot\psi_{\text{board}}\rvert/0.5\text{ rad/s})}_{\text{turning}} \cdot \underbrace{e^{-(\beta/15°)^2}}_{\text{clean}} \cdot (0.5 + 0.5\,\text{low})$: full at 40° and up | 2.0 |
+| **Carve** | $\underbrace{\operatorname{clip}(\lvert\bar\theta\rvert/40°)}_{\text{edged}} \cdot \underbrace{\operatorname{clip}(\lvert\dot\psi_{\text{board}}\rvert/0.5\text{ rad/s})}_{\text{turning}} \cdot \underbrace{e^{-(\beta/15°)^2}}_{\text{clean}} \cdot (0.5 + 0.5\,\text{low})$: full at 40° and up | 2.0 |
 | **Low** | Pelvis above the board, always: ramps from 0 at the 0.80 m stance to full at 0.45 m (full to 0.25 m), never sit down (0 at 0.12 m) | 1.0 |
 | **Turn** | At each fall-line crossing: $\operatorname{clip}\big((\text{swing} - 30°)/(85° - 30°),\ 0,\ 1\big)$: deeper turns pay more, full at 85° | 5.0 |
 | **Fall** | Once, a fall or a fence | −10 |
@@ -120,6 +120,8 @@ flexion 2, spine 5, arms 8.
 | Guide faded on a fixed schedule | Every try: the guide was gone before the policy could ride, so the turn was never learned (baseline: 0 real turns at 70%) | **Adaptive guide**: fades only while followed |
 | Low always rewarded; fall = pelvis below 0.45 m only | **Lay on the snow with the board on its side** (edge 70–100°, pelvis 0–0.2 m above the board) and **spun in place** at 2.6 m/s for carve and turn reward; the fall check never fired | Falls also catch lying (torso > 80°), sitting (< 0.12 m) and a board on its side (> 85°); carve and turns need speed (> 4–5 m/s) |
 | Edge + angulation + low, ungated | **Leaned back onto the heel edge** (65° edge, pelvis 0.4 m, body near horizontal) and rode a straight diagonal into the fence: full edge, angulation and low reward, no turn | Edge and angulation pay only while the board turns; low has a floor |
+
+$\bar\theta$ is the edge angle smoothed over ~0.6 s: every reward that uses the edge reads this, so flipping the edge back and forth (chatter, which showed a 45° edge on a straight line) earns nothing.
 
 ## 4. PPO
 
