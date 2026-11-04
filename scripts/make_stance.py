@@ -28,6 +28,9 @@ parser.add_argument("--hip_y", type=float, default=-0.35, help="initial guess: h
 parser.add_argument("--ankle_y", type=float, default=-0.25, help="initial guess: ankle pitch [rad]")
 parser.add_argument("--guess_from", type=Path, default=None,
                     help="start the settle from another stance file's joint angles (lower the hip step by step)")
+parser.add_argument("--back", type=float, default=0.0, help="hips pushed back [m] along the board's width (+/-: try both)")
+parser.add_argument("--pitch", type=float, default=0.0, help="pelvis hinged forward [deg] about its own y axis (+/-)")
+parser.add_argument("--twist", type=float, default=0.0, help="torso twist abdomen_z [rad]: opens the chest toward the nose")
 parser.add_argument("--tag", default="", help="write a stance variant, e.g. squat: stance[_<front>_<back>]_<tag>.yaml")
 add_launcher_args(parser)
 args = parser.parse_args()
@@ -43,7 +46,7 @@ from envs import config
 
 # initial guess: bent knees, flexed hips, feet turned toward the nose
 GUESS = {".*_knee": args.knee, ".*_hip_y": args.hip_y, ".*_ankle_y": args.ankle_y, "left_hip_z": 0.38,
-         "right_hip_z": 0.12}
+         "right_hip_z": 0.12, "abdomen_z": args.twist}
 if args.guess_from is not None:
     import yaml as _yaml
 
@@ -58,8 +61,11 @@ def main():
     board_z = 0.5  # pin the board in the air; gravity is off
     board_pose = ((0.0, 0.0, board_z), (1.0, 0.0, 0.0, 0.0))  # wxyz for USD
     pelvis_yaw = math.radians(-90.0 + args.open_deg)
-    pelvis_pos = (board["setback"], 0.0, board_z + board_top + args.hip_height)
-    pelvis_quat = (0.0, 0.0, math.sin(pelvis_yaw / 2), math.cos(pelvis_yaw / 2))  # xyzw
+    pelvis_pos = (board["setback"], args.back, board_z + board_top + args.hip_height)
+    sz, cz = math.sin(pelvis_yaw / 2), math.cos(pelvis_yaw / 2)
+    sy, cy = math.sin(math.radians(args.pitch) / 2), math.cos(math.radians(args.pitch) / 2)
+    # yaw about z, then hinge about the pelvis's own y: q = q_yaw * q_pitch (xyzw)
+    pelvis_quat = (-sz * sy, cz * sy, sz * cy, cz * cy)
 
     sim_cfg = sim_utils.SimulationCfg(dt=1 / 120, device=args.device, gravity=(0.0, 0.0, 0.0))
     with launch_simulation(sim_cfg, args):
@@ -112,6 +118,32 @@ def main():
             dq = quat_mul(quat_conjugate(bind_q), quat[f])
             ang = math.degrees(2 * math.acos(min(1.0, abs(dq[3].item()))))
             print(f"[stance] {foot} binding residual: {1000 * (sole_w - bind_w).norm().item():.2f} mm, {ang:.2f} deg")
+
+        # squat metrics. f = the way the pelvis faces, flat. knee_fwd: knee ahead of the ankle along its foot's direction (a foot reaches
+        # ~0.1 m past its ankle, so more than that is a knee poking out past the toes); hip_back: hips behind the feet
+        # (negative = back); lean: torso from vertical, + = forward; chest_yaw: chest vs the board's nose (0 = facing it)
+        def flat(v):
+            v = v.clone()
+            v[2] = 0.0
+            return v / v.norm().clamp_min(1e-6)
+
+        pi_ = names.index("pelvis")
+        fwd = flat(quat_apply(quat[pi_], torch.tensor([1.0, 0.0, 0.0], device=pos.device)))
+        up = torch.tensor([0.0, 0.0, 1.0], device=pos.device)
+        parts = []
+        for side in ("right", "left"):
+            foot_dir = flat(quat_apply(quat[names.index(f"{side}_foot")], torch.tensor([1.0, 0.0, 0.0], device=pos.device)))
+            knee_fwd = ((pos[names.index(f"{side}_shin")] - pos[names.index(f"{side}_foot")]) * foot_dir).sum().item()
+            parts.append(f"{side} knee_fwd {knee_fwd:+.2f} m")
+        feet_mid = (pos[names.index("right_foot")] + pos[names.index("left_foot")]) / 2
+        parts.append(f"hip_back {((pos[pi_] - feet_mid) * fwd).sum().item():+.2f} m")
+        torso_v = pos[names.index("head")] - pos[pi_]
+        parts.append(f"lean {math.degrees(math.atan2((torso_v * fwd).sum().item(), torso_v[2].item())):+.0f} deg")
+        chest = flat(quat_apply(quat[names.index("torso")], torch.tensor([1.0, 0.0, 0.0], device=pos.device)))
+        nose = flat(quat_apply(bq, torch.tensor([1.0, 0.0, 0.0], device=pos.device)))
+        cyaw = math.degrees(math.atan2(torch.cross(nose, chest, dim=-1)[2].item(), (nose * chest).sum().item()))
+        parts.append(f"chest_yaw {cyaw:+.0f} deg")
+        print("[stance] squat: " + ", ".join(parts))
 
         p = names.index("pelvis")
         rel_pos = quat_apply_inverse(bq, pos[p] - bp)

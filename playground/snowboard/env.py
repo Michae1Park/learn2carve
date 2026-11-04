@@ -80,6 +80,8 @@ class SnowboardEnvCfg(CarveEnvCfg):
     edge_target_deg = 20.0  # full carve credit at or above this edge angle. Carve: 40 (see __post_init__)
     rew_low = 1.0  # turn tasks, always: pelvis 0.30–0.45 m above the board, ramping up from the 0.80 m stance; never lie
                    # down (0 at 0.15 m: an ungated version was gamed by leaning back)
+    rew_facing = 1.0  # turn tasks: shoulders open, chest toward the travel direction (the nose): max(cos, 0)
+    rew_hip = 1.0  # turn tasks: the folded L from head to knee: torso-thigh angle 180° (straight) -> 0, 45° or tighter -> 1
     rew_slip = 2.0  # skid / side slip only (the carve term covers slip for carving): exp(-(slip error / σ_slip)²)
     rew_heading = 2.0  # side slip only: exp(-(heading / σ)²), straight down the fall line
     rew_turn = 1.0  # per completed turn (turn tasks): links the turns
@@ -250,6 +252,7 @@ class SnowboardEnv(CarveEnv):
         zeros = torch.zeros_like(speed)
         edge = self.snow_info["edge_angle"].abs() if self.snow_info else zeros
         clean = torch.exp(-(self.slip_angle() / math.radians(cfg.sigma_slip_deg)).square())
+        tech = self._technique() if turns else {}  # also logs pelvis height and angulation
         terms = {
             "alive": (~self.reset_terminated).float(),
             "speed": torch.exp(-((speed - self.v_cmd) / cfg.sigma_speed).square()),
@@ -262,12 +265,12 @@ class SnowboardEnv(CarveEnv):
             "carve": (edge / math.radians(cfg.edge_target_deg)).clamp(0.0, 1.0) * self.turning() * clean
             * (0.5 + 0.5 * self.low()) * ((speed - 4.0) / 4.0).clamp(0.0, 1.0) if cfg.task == "carve" else zeros,
             "low": self.low() if turns else zeros,
+            "facing": tech["facing"] if turns else zeros,
+            "hip": self.hip_fold() if turns else zeros,
             "slip": zeros if cfg.task == "carve" else torch.exp(-(e_slip / math.radians(cfg.sigma_slip_deg)).square()),
             "heading": zeros if turns else torch.exp(-(psi / math.radians(cfg.sigma_heading_deg)).square()),
             "action_rate": (self.actions - self.prev_actions).square().sum(-1),
         }
-        if turns:
-            self._technique()  # logged only (pelvis height, angulation)
         reward = torch.zeros(self.num_envs, device=self.device)
         for name, value in terms.items():
             r = getattr(cfg, f"rew_{name}") * value * self.step_dt
@@ -309,6 +312,25 @@ class SnowboardEnv(CarveEnv):
         a deep carve), then 0 at 0.15 m (lying). The ramp starts at the stance so a standing rider feels a gradient."""
         h = self.pelvis_height()
         return ((0.80 - h) / 0.35).clamp(0.0, 1.0) * ((h - 0.15) / 0.15).clamp(0.0, 1.0)
+
+    def hip_fold(self) -> torch.Tensor:
+        """0..1: the folded L from head to knee. The angle between the torso line (hip to head) and the thigh line
+        (hip to knee), per leg, averaged: 0 with torso and leg in one line (180°), 1 at 45° or tighter (a 30-45° L),
+        tapering to 0 at 15° so the chest doesn't fold flat onto the thighs."""
+        if not hasattr(self, "_fold_ids"):
+            names = self.robot.body_names
+            self._fold_ids = [(names.index(f"{s}_thigh"), names.index(f"{s}_shin")) for s in ("right", "left")]
+            self._head_id = names.index("head")
+        head = self.body_pos(self._head_id)
+        fold = []
+        for thigh, shin in self._fold_ids:
+            hip = self.body_pos(thigh)  # the thigh link starts at the hip, the shin link at the knee
+            torso, leg = head - hip, self.body_pos(shin) - hip
+            cos = (torso * leg).sum(-1) / (torso.norm(dim=-1) * leg.norm(dim=-1)).clamp_min(1e-6)
+            angle = cos.clamp(-1.0, 1.0).acos()
+            fold.append(((math.pi - angle) / math.radians(135.0)).clamp(0.0, 1.0)
+                        * ((angle - math.radians(15.0)) / math.radians(15.0)).clamp(0.0, 1.0))
+        return torch.stack(fold).mean(0)
 
     def turning(self) -> torch.Tensor:
         """0..1: how hard the board is turning, from its yaw rate about the snow normal (full at 0.5 rad/s)."""
