@@ -88,6 +88,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     edge_cmd: bool = False
     rew_edge_cmd = 6.0  # exp(-((θ - θ*) / σ)²)
     edge_cmd_sigma_deg = 12.0
+    rew_edge_side = 0.0  # +1 on the commanded side, -1 on the other (|cmd| > 10°, |θ| > 3°): pays for starting the switch
     edge_cmd_clean: bool = True  # × clean (no skid) on the tracking reward
     # pendulum reference (scripts/pendulum_rl.py): a double pendulum that learned the edge command leans its legs into
     # the turn (φ1 ≈ 1.15 θ*) and counter-leans its torso so the centre of mass leans less (≈ 0.77 φ1*): angulation.
@@ -446,6 +447,12 @@ class SnowboardEnv(CarveEnv):
                  * self.step_dt)
             reward += r
             self._track("rew_edge_cmd", r)
+            if cfg.rew_edge_side:
+                cmd = self.edge_command()
+                on = (cmd.abs() > math.radians(10.0)) & (theta.abs() > math.radians(3.0))
+                r = cfg.rew_edge_side * torch.where(on, torch.sign(theta) * torch.sign(cmd), zeros) * self.step_dt
+                reward += r
+                self._track("rew_edge_side", r)
             self._track("err_edge_cmd_deg", e_cmd.abs().rad2deg())
             self._adapt_edge_cmd(e_cmd.abs().rad2deg())
             if cfg.rew_pose_ref:
