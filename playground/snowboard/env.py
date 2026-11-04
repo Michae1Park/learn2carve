@@ -418,7 +418,12 @@ class SnowboardEnv(CarveEnv):
             theta = self.snow_info["edge_angle"] if self.snow_info else zeros
             e_cmd = theta - self.edge_command()
             # × clean: only while carving, not sliding sideways (a flat side slip held the speed and hit the fence)
-            r = cfg.rew_edge_cmd * torch.exp(-(e_cmd / math.radians(cfg.edge_cmd_sigma_deg)).square()) * clean * self.step_dt
+            # × edged: while the command asks for an edge (|θ*| > 10°), a flat board earns nothing (riding flat and
+            # straight down the fall line collected partial credit); full from |θ| ≥ 20°, the base crossing stays free
+            edged = torch.where(self.edge_command().abs() > math.radians(10.0),
+                                ((theta.abs() - math.radians(10.0)) / math.radians(10.0)).clamp(0.0, 1.0), torch.ones_like(theta))
+            r = (cfg.rew_edge_cmd * torch.exp(-(e_cmd / math.radians(cfg.edge_cmd_sigma_deg)).square()) * clean * edged
+                 * self.step_dt)
             reward += r
             self._track("rew_edge_cmd", r)
             self._track("err_edge_cmd_deg", e_cmd.abs().rad2deg())
