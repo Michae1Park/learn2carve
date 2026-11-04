@@ -42,19 +42,21 @@ from .snow import SnowParams, air_drag, board_wrench, snow_wrench
 STANCE_FILE = config.ROOT / "envs/assets/stance.yaml"  # the config.yaml binding angles
 
 
-def stance_file(binding_angles: tuple[float, float] | None = None):
-    """stance.yaml for the config's binding angles, stance_<front>_<back>.yaml for others (scripts/make_stance.py)."""
+def stance_file(binding_angles: tuple[float, float] | None = None, tag: str = ""):
+    """stance.yaml for the config's binding angles, stance_<front>_<back>.yaml for others (scripts/make_stance.py).
+    A tag (e.g. "squat") picks a variant: stance[_<front>_<back>]_<tag>.yaml."""
+    suffix = f"_{tag}" if tag else ""
     if binding_angles is None or list(binding_angles) == list(config.load()["rider"]["binding_angles_deg"]):
-        return STANCE_FILE
+        return STANCE_FILE.with_name(f"stance{suffix}.yaml")
     front, back = binding_angles
-    return STANCE_FILE.with_name(f"stance_{front:g}_{back:g}.yaml")
+    return STANCE_FILE.with_name(f"stance_{front:g}_{back:g}{suffix}.yaml")
 KEY_BODIES = ["right_hand", "left_hand", "right_foot", "left_foot"]
 
 
-def load_stance(binding_angles: tuple[float, float] | None = None) -> dict:
-    path = stance_file(binding_angles)
+def load_stance(binding_angles: tuple[float, float] | None = None, tag: str = "") -> dict:
+    path = stance_file(binding_angles, tag)
     if not path.exists():
-        hint = f" --angles {binding_angles[0]:g} {binding_angles[1]:g}" if binding_angles else ""
+        hint = (f" --angles {binding_angles[0]:g} {binding_angles[1]:g}" if binding_angles else "") + (f" --tag {tag}" if tag else "")
         raise FileNotFoundError(f"{path} missing: run scripts/py scripts/make_stance.py{hint} first")
     return yaml.safe_load(path.read_text())
 
@@ -114,6 +116,7 @@ class CarveEnvCfg(DirectRLEnvCfg):
     compliant_drives: bool = False  # per-joint-group stiffness (envs/rider.py COMPLIANT) instead of uniform, stiff
     # board model (defaults = one rigid board); see docs/BOARD_MODEL.md
     board_flex: bool = False  # two halves + torsion/camber spring; progressive sidecut and flex in the snow model
+    stance_tag: str = ""  # stance file variant, e.g. "squat" (scripts/make_stance.py --hip_height 0.5 --tag squat)
     binding_angles_deg: tuple[float, float] | None = None  # (front, back); None = config.yaml. Needs its stance file
 
     sim: SimulationCfg = SimulationCfg(
@@ -167,7 +170,7 @@ def apply_rider_options(cfg: CarveEnvCfg) -> None:
         cfg.observation_space = base_obs_size(cfg)
     angles = tuple(cfg.binding_angles_deg) if cfg.binding_angles_deg is not None else None
     cfg.scene.robot = rider_cfg(
-        stance=load_stance(angles), binding_angles=angles, solver_iterations=tuple(cfg.solver_iterations),
+        stance=load_stance(angles, cfg.stance_tag), binding_angles=angles, solver_iterations=tuple(cfg.solver_iterations),
         thoracic=cfg.thoracic,
         neck_stiffness_scale=cfg.neck_stiffness_scale, spine_damping_scale=cfg.spine_damping_scale,
         compliant_drives=cfg.compliant_drives, board_flex=cfg.board_flex, stiff_boots=cfg.stiff_boots,
@@ -231,7 +234,8 @@ class CarveEnv(DirectRLEnv):
             self.camber_rest = camber_angle(params["board"]["effective_edge"])
 
         # stance: default joint targets, and the pelvis pose relative to the board
-        stance = load_stance(tuple(self.cfg.binding_angles_deg) if self.cfg.binding_angles_deg is not None else None)
+        stance = load_stance(tuple(self.cfg.binding_angles_deg) if self.cfg.binding_angles_deg is not None else None,
+                             self.cfg.stance_tag)
         self.stance_pos = self.robot.data.default_joint_pos.torch.clone()
         self.pelvis_in_board_pos = torch.tensor(stance["pelvis_pos"], device=self.device)
         self.pelvis_in_board_quat = torch.tensor(stance["pelvis_quat"], device=self.device)
