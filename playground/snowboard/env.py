@@ -75,6 +75,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_speed_cap = -10.0  # × clip((|v| - speed_cap) / 2, 0, 1): over the cap is clearly worse than turning
     speed_cap = 12.0  # m/s; a clean carve on 15° settles at ~19-21 m/s, so the cap forces turns finished across the hill
     # carve: edged × turning × clean × low = clip(|θ|/edge_target) · clip(|ψ̇_board|/0.5) · exp(-(β/σ)²) · (0.5 + 0.5 low)
+    lying_deg = 80.0  # torso tilt from vertical that counts as lying (a deep toe-side carve bows it 55-70°)
     fall_height = 0.15  # pelvis above the snow [m]: at the apex of a deep carve the hips are ~0.2 m from it (was 0.45)
     rew_carve = 2.0
     edge_target_deg = 20.0  # full carve credit at or above this edge angle. Carve: 40 (see __post_init__)
@@ -344,7 +345,7 @@ class SnowboardEnv(CarveEnv):
         # board's edge held the pelvis above 0.45 m), and the policy learned to lie there and spin for carve reward
         torso_up = quat_apply(self.body_quat(self.torso_id), self.up.expand(self.num_envs, 3))
         # thresholds leave room for deep carves (reference-image/): torso inclined ~60-70°, hips just above the snow
-        lying = (torso_up * self.up).sum(-1) < math.cos(math.radians(80.0))
+        lying = (torso_up * self.up).sum(-1) < math.cos(math.radians(self.cfg.lying_deg))
         sitting = self.pelvis_height() < 0.12  # below the low band (0.30-0.45 m, reward 0 at 0.15)
         on_side = self.snow_info["edge_angle"].abs() > math.radians(85.0) if self.snow_info else torch.zeros_like(lying)
         # nose first, always: riding tail first (reverse / switch carving) ends the episode as a fall

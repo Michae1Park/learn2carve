@@ -85,7 +85,14 @@ class RunStats:
         self.max_y = max(self.max_y, abs(y))
         self.rows.append((x, y, env.board_speed()[0].item(), math.degrees(env.slip_angle()[0].item()),
                           math.degrees(env.snow_info["edge_angle"][0].item()),
-                          math.degrees(env.edge_command()[0].item()) if env.cfg.edge_cmd else 0.0))
+                          math.degrees(env.edge_command()[0].item()) if env.cfg.edge_cmd else 0.0,
+                          self._tilt(env), env.pelvis_height()[0].item()))
+
+    @staticmethod
+    def _tilt(env) -> float:
+        from isaaclab.utils.math import quat_apply
+        up = quat_apply(env.body_quat(env.torso_id), env.up.expand(env.num_envs, 3))[0]  # torso up vs world up
+        return math.degrees(math.acos(max(-1.0, min(1.0, float((up * env.up).sum())))))
 
     def line(self, number: int, end: str, step_dt: float) -> str:
         mean = {k: v / max(self.steps, 1) for k, v in self.sums.items()}
@@ -128,7 +135,7 @@ def main():
         recorder = Recorder(raw_env, trail) if args.record else None
         longest_secs, longest_marks, rows = ride(env, raw_env, agent, trail, recorder)
         csv = out.with_name(out.stem.replace("trail", "ride") + ".csv")  # next to trail.png
-        csv.write_text("x,y,speed,slip_deg,edge_deg,cmd_deg\n" + "".join(",".join(f"{v:.3f}" for v in r) + "\n" for r in rows))
+        csv.write_text("x,y,speed,slip_deg,edge_deg,cmd_deg,torso_tilt_deg,pelvis_h\n" + "".join(",".join(f"{v:.3f}" for v in r) + "\n" for r in rows))
         if recorder:
             recorder.save(args.record)
 
