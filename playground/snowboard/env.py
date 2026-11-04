@@ -95,6 +95,10 @@ class SnowboardEnvCfg(CarveEnvCfg):
     # the snow normal, for matching it. (The torso line itself leans ~30° at rest: the posi-posi bow shows in the roll
     # plane. The COM is ~0 at rest, balanced, so it needs no offset.)
     rew_pose_ref = 0.0
+    # stage 1 (carve controller): start every episode already in a balanced carve, board on edge θ with
+    # sin θ = v² / (g cos(slope) · R_sc), heel or toe, and command that edge for the whole episode (no transitions)
+    carve_start: bool = False
+    edge_cmd_hold: bool = False
     pose_ref_legs = 1.15
     pose_ref_com = 0.77
     pose_ref_sigma_deg = 15.0
@@ -184,6 +188,7 @@ class SnowboardEnv(CarveEnv):
         self.cmd_period = torch.ones(n, device=dev)  # edge command: this episode's period [s] and phase
         self.cmd_phase = torch.zeros(n, device=dev)
         self.cmd_level = 0.0
+        self.cmd_hold = torch.zeros(n, device=dev)  # edge_cmd_hold: the edge to hold this episode [rad]
         self.cmd_err_ema = 90.0
         self.guide_err_ema = 90.0  # deg, running mean of the guide heading error over all envs
         self.prev_actions = torch.zeros(n, num_dof(cfg), device=dev)
@@ -247,6 +252,8 @@ class SnowboardEnv(CarveEnv):
         """Commanded signed edge angle [rad] (θ < 0 heel, > 0 toe), `ahead_s` seconds from now (0 if off)."""
         if not self.cfg.edge_cmd:
             return torch.zeros(self.num_envs, device=self.device)
+        if self.cfg.edge_cmd_hold:
+            return self.cmd_hold
         lv, cfg = self.cmd_level, self.cfg
         amp = math.radians(cfg.edge_cmd_amp_deg[0] + lv * (cfg.edge_cmd_amp_deg[1] - cfg.edge_cmd_amp_deg[0]))
         t = self.episode_length_buf.float() * self.step_dt + ahead_s
@@ -656,7 +663,13 @@ class SnowboardEnv(CarveEnv):
         lo, hi = self.cfg.start_speed_turns
         speed = lo + (hi - lo) * torch.rand(n, device=self.device)
         velocity = speed.unsqueeze(-1) * direction
-        return heading + jitter, zeros, velocity, zeros
+        edge = zeros
+        if self.cfg.carve_start:  # balanced on edge: the rigid stance leans with the board, so lean = edge
+            g_n = 9.81 * math.cos(math.radians(self.slope_deg))
+            side = torch.where(torch.rand(n, device=self.device) < 0.5, -1.0, 1.0)
+            edge = side * torch.asin((speed.square() / (g_n * 7.6)).clamp(max=0.9))
+            self.cmd_hold[env_ids] = edge
+        return heading + jitter, edge, velocity, zeros
 
 
 def _wrap(angle: torch.Tensor) -> torch.Tensor:
