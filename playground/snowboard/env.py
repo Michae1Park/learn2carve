@@ -81,6 +81,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_low = 1.0  # turn tasks, always: pelvis 0.30–0.45 m above the board, ramping up from the 0.80 m stance; never sit
                    # down (0 at 0.12 m: an ungated version was gamed by leaning back)
     rew_edge_switch = 10.0  # turn tasks: per edge change, the held edge (smoothed, ≥20°) flips from heel to toe or back
+    switch_flat_deg = 5.0  # an edge change only counts if the board went flat on its base (raw |edge| < this) in between
     rew_wrong_edge = -4.0  # turn tasks: held edge on the side that turns the wrong way for the S (heel when it needs toe and back): clip(angle / 30°)
     rew_release = 2.0  # turn tasks: once the turn has swung (≥30-55°), rolling the held edge toward the OTHER side, dense: clip(roll rate / 1 rad/s)
     rew_deep_edge = -3.0  # turn tasks: held edge beyond 60°, ramping over 15°: too deep to roll back out of (a rider sat at -75°)
@@ -143,6 +144,7 @@ class SnowboardEnv(CarveEnv):
         self.edge_rate = torch.zeros(n, device=dev)  # edge angle rate [rad/s]
         self.edge_side = torch.zeros(n, device=dev)  # last held edge side (-1 heel / +1 toe, 0 none yet) and time on it
         self.since_switch = torch.zeros(n, device=dev)
+        self.base_touched = torch.zeros(n, dtype=torch.bool, device=dev)  # flat on the base since the last held edge
         self.edge_switch = torch.zeros(n, device=dev)  # 1 on the step the held edge flips
         self.edge_ema_rate = torch.zeros(n, device=dev)  # d(edge_ema)/dt [rad/s]
         self.edge_ema = torch.zeros(n, device=dev)  # signed edge angle smoothed over ~0.6 s: chatter cancels, a held edge stays
@@ -240,7 +242,10 @@ class SnowboardEnv(CarveEnv):
         self.edge_ema_rate = torch.where(first, torch.zeros_like(psi), (new_ema - self.edge_ema) / self.step_dt)
         self.edge_ema = new_ema
         held = torch.sign(self.edge_ema) * (self.edge_ema.abs() > math.radians(20.0))
-        self.edge_switch = ((held != 0) & (self.edge_side != 0) & (held != self.edge_side)).float()
+        flipped = (held != 0) & (self.edge_side != 0) & (held != self.edge_side)
+        self.base_touched |= theta.abs() < math.radians(self.cfg.switch_flat_deg)  # heel -> base -> toe
+        self.edge_switch = (flipped & self.base_touched).float()
+        self.base_touched &= held == 0  # cleared while an edge is held: the next change must touch the base again
         self.edge_side = torch.where(held != 0, held, self.edge_side)
         self.since_switch = torch.where(self.edge_switch > 0, torch.zeros_like(self.since_switch),
                                         self.since_switch + self.step_dt)
@@ -490,7 +495,7 @@ class SnowboardEnv(CarveEnv):
         self.last_turns[env_ids] = self.turn_count[env_ids]
         lo, hi = self.cfg.speed_cmd
         self.v_cmd[env_ids] = lo + (hi - lo) * torch.rand(len(env_ids), device=self.device)
-        for buf in (self.turn_side, self.turn_swing, self.turn_count, self.since_turn, self.edge_side, self.since_switch):
+        for buf in (self.turn_side, self.turn_swing, self.turn_count, self.since_turn, self.edge_side, self.since_switch, self.base_touched):
             buf[env_ids] = 0.0
         m = len(env_ids)
         rand = lambda lo_hi: lo_hi[0] + (lo_hi[1] - lo_hi[0]) * torch.rand(m, device=self.device)
