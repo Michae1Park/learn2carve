@@ -86,6 +86,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_height = 1.0  # turn tasks: pelvis height follows the edge, tall (0.50 m) at the edge change, 0.25 m at 45° and up
     height_sigma = 0.10
     rew_swing = 2.0  # carve: heading across the hill while edged: clip(|heading| / min_turn) × clip(edge / edge_target). The turn bonus only pays at 80°; this is the slope to it
+    rew_edge_rate = -2.0  # turn tasks: flipping the edge faster than ~2 rad/s (chatter): clip((|d edge/dt| - 2) / 2, 0, 1)
     rew_bow = 1.0  # turn tasks: upper body bowed forward, torso inclined from the snow normal: 45° flat -> 65° at 45° edge; 0 by 80° (lying)
     rew_arm = 0.5  # turn tasks: one hand low, the other high (the outside arm lifts for balance) while edged
     rew_hand = 1.0  # turn tasks: the lowest hand near the snow while edged (the hand drags at the apex, hangs low at the edge change)
@@ -126,6 +127,10 @@ class SnowboardEnv(CarveEnv):
         n, dev = cfg.scene.num_envs, cfg.sim.device
         # task state must exist before super().__init__, which resets every env
         self.v_cmd = torch.zeros(n, device=dev)  # commanded speed [m/s]
+        self.prev_psi = torch.zeros(n, device=dev)  # path heading / edge angle of the previous step, for their rates
+        self.prev_edge = torch.zeros(n, device=dev)
+        self.psi_rate = torch.zeros(n, device=dev)  # smoothed path heading rate [rad/s] (~0.3 s): chatter averages out
+        self.edge_rate = torch.zeros(n, device=dev)  # edge angle rate [rad/s]
         self.turn_side = torch.zeros(n, device=dev)  # side the path has swung to: -1, 0 (not yet), +1
         self.turn_swing = torch.zeros(n, device=dev)  # largest |heading| on that side so far [rad]
         self.turn_count = torch.zeros(n, device=dev)
@@ -209,6 +214,13 @@ class SnowboardEnv(CarveEnv):
     def _update_turns(self):
         """Count linked turns: the path swings ≥ min_turn to one side, then crosses the fall line to the other."""
         psi = self.path_heading()
+        first = self.episode_length_buf <= 1  # right after a reset: no previous step to difference against
+        rate = torch.where(first, torch.zeros_like(psi), _wrap(psi - self.prev_psi) / self.step_dt).clamp(-3.0, 3.0)
+        self.psi_rate = torch.where(first, torch.zeros_like(psi), 0.9 * self.psi_rate + 0.1 * rate)
+        self.prev_psi = psi
+        theta = self.snow_info["edge_angle"] if self.snow_info else torch.zeros_like(psi)
+        self.edge_rate = torch.where(first, torch.zeros_like(psi), (theta - self.prev_edge) / self.step_dt)
+        self.prev_edge = theta
         side = torch.sign(psi) * (psi.abs() > 0.02)
         crossed = (side != 0) & (self.turn_side != 0) & (side != self.turn_side)
         crossed = crossed & (self.board_speed() > 5.0)  # a turn at speed: spinning in place doesn't count
@@ -274,7 +286,7 @@ class SnowboardEnv(CarveEnv):
             # × (0.5 + 0.5 low): being low pays only while carving (a low crouch riding straight earns nothing), and
             # carving tall still earns half, so the squat isn't required before the carve can be learned
             # × moving: no carve credit below ~4 m/s, full from 8 (spinning in place earned it before)
-            "carve": (edge / math.radians(cfg.edge_target_deg)).clamp(0.0, 1.0) * self.turning() * clean
+            "carve": (edge / math.radians(cfg.edge_target_deg)).clamp(0.0, 1.0) * self.path_turning() * clean
             * (0.5 + 0.5 * self.low()) * ((speed - 4.0) / 4.0).clamp(0.0, 1.0) if cfg.task == "carve" else zeros,
             "low": self.low() if turns else zeros,
             "facing": tech["facing"] if turns else zeros,
@@ -285,7 +297,8 @@ class SnowboardEnv(CarveEnv):
                     .clamp(0.0, 1.0) * ((math.radians(80.0) - incl) / math.radians(10.0)).clamp(0.0, 1.0))(
                 self.torso_incline()) if turns else zeros,
             "swing": ((psi.abs() / self.min_turn).clamp(0.0, 1.0) * (edge / math.radians(cfg.edge_target_deg)).clamp(0.0, 1.0)
-                      * self.turning() if cfg.task == "carve" else zeros),
+                      * self.path_turning() if cfg.task == "carve" else zeros),
+            "edge_rate": ((self.edge_rate.abs() - 2.0) / 2.0).clamp(0.0, 1.0) if turns else zeros,
             "traverse": ((self.since_turn - cfg.traverse_after_s) / cfg.traverse_ramp_s).clamp(0.0, 1.0) if turns else zeros,
             "height": (torch.exp(-((self.pelvis_height() - (0.50 - 0.25 * (edge / math.radians(45.0)).clamp(0.0, 1.0)))
                                    / cfg.height_sigma).square()) if turns else zeros),
@@ -362,6 +375,11 @@ class SnowboardEnv(CarveEnv):
             fold.append(((math.pi - angle) / math.radians(135.0)).clamp(0.0, 1.0)
                         * ((angle - math.radians(15.0)) / math.radians(15.0)).clamp(0.0, 1.0))
         return torch.stack(fold).mean(0)
+
+    def path_turning(self) -> torch.Tensor:
+        """0..1: how hard the path itself turns, from the smoothed path heading rate (full at 0.5 rad/s). Edge chatter
+        spins the board without changing where it goes, so it earns nothing here (board yaw rate paid it)."""
+        return (self.psi_rate.abs() / 0.5).clamp(0.0, 1.0)
 
     def turning(self) -> torch.Tensor:
         """0..1: how hard the board is turning, from its yaw rate about the snow normal (full at 0.5 rad/s)."""
