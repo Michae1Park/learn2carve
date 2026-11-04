@@ -8,6 +8,7 @@ models:
   policy:
     class: GaussianMixin
     initial_log_std: -1.0       # exploration noise at the start (std = e^-1 ≈ 0.37): a bound rider falls from big flails
+    max_log_std: -0.3           # std <= 0.74: it had grown to ~6 (actions are clipped, so the noise only made the rider jitter)
     network:
       - {name: net, input: OBSERVATIONS, layers: [512, 256, 128], activations: elu}
     output: ACTIONS
@@ -36,7 +37,7 @@ agent:
   grad_norm_clip: 1.0
   ratio_clip: 0.2
   value_clip: 0.2
-  entropy_loss_scale: 0.01      # bonus for keeping exploration noise
+  entropy_loss_scale: 0.003     # bonus for keeping exploration noise (0.01 inflated the std)
   value_loss_scale: 1.0
   time_limit_bootstrap: True
 

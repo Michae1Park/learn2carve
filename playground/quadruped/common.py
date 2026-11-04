@@ -121,6 +121,12 @@ def train(raw_env, agent_cfg: dict, run_dir: Path, run: dict, seed: int, init_fr
         ckpt = init_from if init_from.suffix == ".pt" else init_from / "checkpoints" / "best_agent.pt"
         runner.agent.load(str(ckpt))
         print(f"[train] warm start from {ckpt}")
+        # the saved std is whatever the entropy bonus inflated it to; explore from the usual start again
+        log_std = agent_cfg["models"]["policy"].get("initial_log_std", -1.0)
+        for name, param in runner.agent.policy.named_parameters():
+            if "log_std" in name:
+                param.data.fill_(log_std)
+        print(f"[train] exploration std reset to e^{log_std:g}")
     print(f"[train] {run['algo']} / {run['task']} / {run['num_envs']} envs / {timesteps} steps -> {run_dir}")
     try:
         runner.run()

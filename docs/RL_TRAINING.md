@@ -87,8 +87,8 @@ $$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{turn}}\,\mathbb{1}[\text{turn}] \
 | **Swing** | $\operatorname{clip}(\lvert\psi\rvert/55°)\cdot\operatorname{clip}(\lvert\theta\rvert/40°)\cdot$ turning: heading across the hill while carving, the slope up to the turn bonus | 2.0 |
 | **Edge rate** | $\operatorname{clip}((\lvert\dot\theta\rvert - 2)/2,\ 0,\ 1)$: edge chatter (a fast flip bled speed without turning) | −2.0 |
 | **Bow** | torso inclination from the snow normal / (45° + 20° × edge fraction), 0 by 80° (lying): the upper body bows down toward the apex | 1.0 |
-| **Edge change** | Per flip of the held edge (smoothed, $\ge 20°$) from heel to toe or back: the S needs both edges (a policy rode 98% of 23 s on the heel edge and ended at the fence) | 4.0 |
-| **Edge hold** | clip$\big((t_{\text{same edge}} - 5\,\text{s})/3\,\text{s},\ 0,\ 1\big)$: staying on one edge | −3.0 |
+| **Edge change** | Per flip of the held edge (smoothed, $\ge 20°$) from heel to toe or back: the S needs both edges (a policy rode 98% of 23 s on the heel edge and ended at the fence) | 10.0 |
+| **Edge hold** | clip$\big((t_{\text{same edge}} - 3.5\,\text{s})/2\,\text{s},\ 0,\ 1\big)$: staying on one edge | −8.0 |
 | **Uphill** | $\operatorname{clip}((\lvert\psi\rvert - 90°)/15°,\ 0,\ 1)$: heading back up the hill after a turn | −5.0 |
 | **Hips back** | the pelvis behind the feet's midpoint along the board, clip(offset / 0.10 m): the hips push toward the tail, loading the back foot | 1.0 |
 | **Balance** | $e^{-((s_{\text{back}} - 0.5)/0.15)^2}$, $s_{\text{back}}$ the share of the centre of mass between the feet (0 front foot, 1 back foot): the bowed torso balances the hips | 1.0 |

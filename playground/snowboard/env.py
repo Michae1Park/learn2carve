@@ -80,10 +80,10 @@ class SnowboardEnvCfg(CarveEnvCfg):
     edge_target_deg = 20.0  # full carve credit at or above this edge angle. Carve: 40 (see __post_init__)
     rew_low = 1.0  # turn tasks, always: pelvis 0.30–0.45 m above the board, ramping up from the 0.80 m stance; never sit
                    # down (0 at 0.12 m: an ungated version was gamed by leaning back)
-    rew_edge_switch = 4.0  # turn tasks: per edge change, the held edge (smoothed, ≥20°) flips from heel to toe or back
-    rew_edge_hold = -3.0  # turn tasks: staying on one edge longer than edge_hold_after_s: per second, ramping over edge_hold_ramp_s
-    edge_hold_after_s = 5.0
-    edge_hold_ramp_s = 3.0
+    rew_edge_switch = 10.0  # turn tasks: per edge change, the held edge (smoothed, ≥20°) flips from heel to toe or back
+    rew_edge_hold = -8.0  # turn tasks: staying on one edge longer than edge_hold_after_s: per second, ramping over edge_hold_ramp_s
+    edge_hold_after_s = 3.5
+    edge_hold_ramp_s = 2.0
     rew_traverse = -3.0  # turn tasks: no completed turn for traverse_after_s: per second, ramping to full over traverse_ramp_s
     traverse_after_s = 3.0
     traverse_ramp_s = 3.0
