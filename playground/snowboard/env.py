@@ -75,11 +75,11 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_speed_cap = -3.0  # × clip((|v| - speed_cap) / 2, 0, 1): over the cap is clearly worse than turning
     speed_cap = 12.0  # m/s; a clean carve on 15° settles at ~19-21 m/s, so the cap forces turns finished across the hill
     # carve: edged × turning × clean × low = clip(|θ|/edge_target) · clip(|ψ̇_board|/0.5) · exp(-(β/σ)²) · (0.5 + 0.5 low)
-    fall_height = 0.20  # pelvis above the snow [m]: a deep carve puts the hips within ~0.3 m of it (was 0.45)
+    fall_height = 0.15  # pelvis above the snow [m]: at the apex of a deep carve the hips are ~0.2 m from it (was 0.45)
     rew_carve = 2.0
     edge_target_deg = 20.0  # full carve credit at or above this edge angle. Carve: 40 (see __post_init__)
-    rew_low = 1.0  # turn tasks, always: pelvis 0.30–0.45 m above the board, ramping up from the 0.80 m stance; never lie
-                   # down (0 at 0.15 m: an ungated version was gamed by leaning back)
+    rew_low = 1.0  # turn tasks, always: pelvis 0.30–0.45 m above the board, ramping up from the 0.80 m stance; never sit
+                   # down (0 at 0.12 m: an ungated version was gamed by leaning back)
     rew_facing = 1.0  # turn tasks: shoulders open, chest toward the travel direction (the nose): max(cos, 0)
     rew_hip = 1.0  # turn tasks: the folded L from head to knee: torso-thigh angle 180° (straight) -> 0, 45° or tighter -> 1
     rew_slip = 2.0  # skid / side slip only (the carve term covers slip for carving): exp(-(slip error / σ_slip)²)
@@ -308,10 +308,10 @@ class SnowboardEnv(CarveEnv):
         return self.body_pos(self.pelvis_id)[:, 2] - self.body_pos(self.board_id)[:, 2]
 
     def low(self) -> torch.Tensor:
-        """0..1: a ramp from 0 at the 0.80 m stance to full at 0.45 m, full down to 0.30 m (hips near the snow, as in
-        a deep carve), then 0 at 0.15 m (lying). The ramp starts at the stance so a standing rider feels a gradient."""
+        """0..1: a ramp from 0 at the 0.80 m stance to full at 0.45 m, full down to 0.25 m (hips near the snow, as at the
+        apex of a deep carve), then 0 at 0.12 m (sitting). The ramp starts at the stance so a standing rider feels a gradient."""
         h = self.pelvis_height()
-        return ((0.80 - h) / 0.35).clamp(0.0, 1.0) * ((h - 0.15) / 0.15).clamp(0.0, 1.0)
+        return ((0.80 - h) / 0.35).clamp(0.0, 1.0) * ((h - 0.12) / 0.13).clamp(0.0, 1.0)
 
     def hip_fold(self) -> torch.Tensor:
         """0..1: the folded L from head to knee. The angle between the torso line (hip to head) and the thigh line
