@@ -89,6 +89,15 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_edge_cmd = 6.0  # exp(-((θ - θ*) / σ)²)
     edge_cmd_sigma_deg = 12.0
     edge_cmd_clean: bool = True  # × clean (no skid) on the tracking reward
+    # pendulum reference (scripts/pendulum_rl.py): a double pendulum that learned the edge command leans its legs into
+    # the turn (φ1 ≈ 1.15 θ*) and counter-leans its torso so the centre of mass leans less (≈ 0.77 φ1*): angulation.
+    # Reward the humanoid's leg line (board -> pelvis) and its centre of mass (board -> COM), roll-plane leans from
+    # the snow normal, for matching it. (The torso line itself leans ~30° at rest: the posi-posi bow shows in the roll
+    # plane. The COM is ~0 at rest, balanced, so it needs no offset.)
+    rew_pose_ref = 0.0
+    pose_ref_legs = 1.15
+    pose_ref_com = 0.77
+    pose_ref_sigma_deg = 15.0
     edge_cmd_amp_deg = (20.0, 50.0)  # level 0 -> 1
     edge_cmd_period_s = (4.6, 4.0)  # one full S (two edges, a turn every ~2 s), level 0 -> 1; ±15 % per episode
     edge_cmd_hold = 1.8  # trapezoid sharpness: clamp(hold · sin, -1, 1)
@@ -429,6 +438,17 @@ class SnowboardEnv(CarveEnv):
             self._track("rew_edge_cmd", r)
             self._track("err_edge_cmd_deg", e_cmd.abs().rad2deg())
             self._adapt_edge_cmd(e_cmd.abs().rad2deg())
+            if cfg.rew_pose_ref:
+                legs, torso = self.roll_leans()
+                legs_ref = cfg.pose_ref_legs * self.edge_command()
+                torso_ref = cfg.pose_ref_com * legs_ref
+                sig = math.radians(cfg.pose_ref_sigma_deg)
+                match = torch.exp(-((legs - legs_ref) / sig).square()) * torch.exp(-((torso - torso_ref) / sig).square())
+                r = cfg.rew_pose_ref * match * self.step_dt
+                reward += r
+                self._track("rew_pose_ref", r)
+                self._track("legs_lean_deg", legs.rad2deg() * torch.sign(self.edge_command()))
+                self._track("com_lean_deg", torso.rad2deg() * torch.sign(self.edge_command()))
         if turns:  # a bonus per edge change, not a rate: the S needs both edges
             r = cfg.rew_edge_switch * self.edge_switch
             reward += r
@@ -446,6 +466,21 @@ class SnowboardEnv(CarveEnv):
         self._track("edge_abs_deg", self.snow_info["edge_angle"].abs().rad2deg() if self.snow_info
                     else torch.zeros_like(speed))
         return reward
+
+    def roll_leans(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """(legs, COM) lean in the board's roll plane from the snow normal [rad], + toward the edge θ > 0 engages:
+        legs = board -> pelvis line, COM = board -> centre of mass (rider only)."""
+        from envs.snow import board_frame
+
+        if not hasattr(self, "_com_ids"):
+            self.stance_balance()  # sets _com_ids / _com_mass
+        n = self.up.expand(self.num_envs, 3)
+        _, lat, _ = board_frame(self.body_quat(self.board_id), n)
+        side = -lat  # θ > 0 lifts the board's +y side: it rides the -y edge, and leans that way
+        board, pelvis = self.body_pos(self.board_id), self.body_pos(self.pelvis_id)
+        com = (self.body_pos(self._com_ids) * self._com_mass.view(1, -1, 1)).sum(1) / self._com_mass.sum()
+        lean = lambda d: torch.atan2((d * side).sum(-1), (d * n).sum(-1))
+        return lean(pelvis - board), lean(com - board)
 
     def pelvis_height(self) -> torch.Tensor:
         """Pelvis above the board along the snow normal [m] (stance 0.80)."""
