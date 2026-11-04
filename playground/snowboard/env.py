@@ -81,6 +81,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_low = 1.0  # turn tasks, always: pelvis 0.30–0.45 m above the board, ramping up from the 0.80 m stance; never sit
                    # down (0 at 0.12 m: an ungated version was gamed by leaning back)
     rew_edge_switch = 10.0  # turn tasks: per edge change, the held edge (smoothed, ≥20°) flips from heel to toe or back
+    reverse_slip_deg = 100.0  # |slip angle| beyond this at speed = riding tail first: a fall (never allowed)
     switch_flat_deg = 5.0  # an edge change only counts if the board went flat on its base (raw |edge| < this) in between
     rew_wrong_edge = -4.0  # turn tasks: held edge on the side that turns the wrong way for the S (heel when it needs toe and back): clip(angle / 30°)
     rew_release = 2.0  # turn tasks: once the turn has swung (≥30-55°), rolling the held edge toward the OTHER side, dense: clip(roll rate / 1 rad/s)
@@ -289,7 +290,9 @@ class SnowboardEnv(CarveEnv):
         lying = (torso_up * self.up).sum(-1) < math.cos(math.radians(80.0))
         sitting = self.pelvis_height() < 0.12  # below the low band (0.30-0.45 m, reward 0 at 0.15)
         on_side = self.snow_info["edge_angle"].abs() > math.radians(85.0) if self.snow_info else torch.zeros_like(lying)
-        fallen = fallen | lying | sitting | on_side
+        # nose first, always: riding tail first (reverse / switch carving) ends the episode as a fall
+        reverse = (self.slip_angle().abs() > math.radians(self.cfg.reverse_slip_deg)) & (self.board_speed() > 2.0)
+        fallen = fallen | lying | sitting | on_side | reverse
         x, y = self.position().unbind(-1)
         self.out_of_bounds = y.abs() > self.cfg.fence_half_width
         if self.cfg.run_length is not None:
