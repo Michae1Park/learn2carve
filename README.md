@@ -22,4 +22,10 @@
 slip). Recorded with <code>playground/snowboard/play.py &lt;run&gt; --record docs/demo/&lt;task&gt;</code>; see
 <a href="playground/snowboard/README.md">playground/snowboard</a>.</em>
 
-Pipeline, stages, layout and stack: [docs/OVERVIEW.md](docs/OVERVIEW.md).
+| Doc | What |
+|---|---|
+| [Overview](docs/OVERVIEW.md) | Pipeline, stages, layout, stack |
+| [Humanoid model](docs/HUMANOID_MODEL.md) | Bodies, joints, drives, binding loop, stance |
+| [Board model](docs/BOARD_MODEL.md) | Geometry, sidecut, bindings |
+| [Snow model](docs/SNOW_MODEL.md) | Glide, sidecut steering, edge grip, validation |
+| [RL training](docs/RL_TRAINING.md) | MDP, reward, PPO, learning curves |

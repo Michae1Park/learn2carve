@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="460" viewBox="0 0 1200 460" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>Snowboard top view to scale: 152 cm long, 289 mm at the tips, 246 mm at the waist, 1.14 m effective edge, bindings 52 cm apart at +42 and +27 degrees, regular posi-posi stance facing the toe edge, nose to the left</title>
+  <defs>
+    <marker id="dim" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#374151"/>
+    </marker>
+    <style>
+      .name { font-size: 22px; font-weight: 700; fill: #111827; }
+      .sub { font-size: 17px; fill: #374151; }
+      .dimtext { font-size: 16px; fill: #374151; }
+      .edge { font-size: 17px; font-weight: 700; }
+      .dimline { stroke: #374151; stroke-width: 1.5; fill: none; marker-start: url(#dim); marker-end: url(#dim); }
+      .guide { stroke: #9AA3AF; stroke-width: 1.2; stroke-dasharray: 5 5; fill: none; }
+      .board { fill: #EAF2FF; stroke: #2F6FDB; stroke-width: 2.5; }
+      .foot { fill: #FFF4E0; stroke: #D98A00; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <!-- solid card: readable in GitHub's light and dark themes -->
+  <rect x="1" y="1" width="1198" height="458" rx="16" fill="#FFFFFF" stroke="#E5E7EB" stroke-width="2"/>
+
+  <!-- scale: 500 px per metre; board centre (600, 230) -->
+  <!-- geometry drawn nose-right, then turned 180° about the board centre: nose left, toe edge on top -->
+  <g transform="rotate(180 600 230)">
+  <path class="board" d="M315,158 Q600,179 885,158 C950,158 985,190 985,230 C985,270 950,302 885,302
+                         Q600,281 315,302 C250,302 215,270 215,230 C215,190 250,158 315,158 Z"/>
+
+  <!-- effective edge contact points -->
+  <path class="guide" d="M315,120 L315,340"/>
+  <path class="guide" d="M885,120 L885,340"/>
+
+  <!-- bindings: centre at setback ± stance/2, toe direction at (alpha - 90°); boots 245 mm long -->
+  <g transform="translate(722,230) rotate(48)"><rect x="-61.25" y="-25" width="122.5" height="50" rx="14" class="foot"/></g>
+  <g transform="translate(462,230) rotate(63)"><rect x="-61.25" y="-25" width="122.5" height="50" rx="14" class="foot"/></g>
+  </g>
+  <text x="478" y="124" class="sub" text-anchor="middle">front +42°</text>
+  <text x="738" y="124" class="sub" text-anchor="middle">back +27°</text>
+
+  <!-- labels -->
+  <text x="140" y="236" class="name">Nose</text>
+  <text x="1000" y="236" class="name">Tail</text>
+  <text x="600" y="146" class="edge" text-anchor="middle" fill="#D64545">toe edge (−y): rider faces this way</text>
+  <text x="600" y="330" class="edge" text-anchor="middle" fill="#7C4DDB">heel edge (+y)</text>
+
+  <!-- dimensions -->
+  <path class="dimline" d="M215,392 L985,392"/>
+  <text x="600" y="384" class="dimtext" text-anchor="middle">length 1.52 m</text>
+  <path class="dimline" d="M315,424 L885,424"/>
+  <text x="600" y="446" class="dimtext" text-anchor="middle">effective edge L = 1.14 m (contact points)</text>
+  <path class="dimline" d="M478,96 L738,96"/>
+  <text x="608" y="86" class="dimtext" text-anchor="middle">stance 0.52 m</text>
+  <path class="dimline" d="M1080,158 L1080,302"/>
+  <text x="1092" y="226" class="dimtext">289 mm</text>
+  <text x="1092" y="248" class="dimtext">tips</text>
+  <text x="600" y="280" class="dimtext" text-anchor="middle" fill="#2F6FDB">waist 246 mm</text>
+
+  <text x="24" y="34" class="sub">Top view, to scale. Regular, posi-posi stance: left foot forward, both bindings angled toward the nose.</text>
+  <text x="24" y="58" class="sub">Sidecut depth d = (289 − 246) / 2 = 21.5 mm  →  R_sc ≈ L² / 8d = 7.6 m</text>
+</svg>
