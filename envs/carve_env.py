@@ -112,6 +112,13 @@ class CarveEnvCfg(DirectRLEnvCfg):
     # joint groups left to their drives (held at the stance target, still physical) instead of the policy: fewer
     # actions to explore. Any of PASSIVE_GROUPS: "ankle" (6, boots), "neck" (3), "knee:2" (2, knee twist)
     passive_joints: tuple[str, ...] = ()
+    # synergy actions (the double pendulum's two, scripts/pendulum_rl.py): 2 extra actions in front of the joints.
+    # edge: ankle flex + knees, both legs (+1 -> heel edge, scripts/edge_sweep.py); lean: torso side bend
+    # (abdomen_x). The 28 joint actions become a residual at synergy_residual of their range.
+    synergy: bool = False
+    synergy_edge_rad: dict = {"left_ankle_y": 0.5, "right_ankle_y": 0.5, "left_knee": 0.6, "right_knee": 0.6}
+    synergy_lean_rad: dict = {"abdomen_x": 0.9}
+    synergy_residual: float = 0.3
     ankle_range_deg: dict = {}  # wider ankle limits, e.g. {"x": 45, "y": 80, "z": 55} (envs/rider.py _widen_ankles)
     stiff_boots: bool = False  # ankles held near their stance angle, 3× stiffer (envs/rider.py BOOT_RANGE_DEG)
     compliant_drives: bool = False  # per-joint-group stiffness (envs/rider.py COMPLIANT) instead of uniform, stiff
@@ -166,7 +173,7 @@ def apply_rider_options(cfg: CarveEnvCfg) -> None:
     cfg.decimation = cfg.physics_hz // 30
     cfg.sim.dt = 1.0 / cfg.physics_hz
     cfg.sim.render_interval = cfg.decimation
-    cfg.action_space = num_dof(cfg)
+    cfg.action_space = num_dof(cfg) + (2 if cfg.synergy else 0)
     if cfg.observation_space == 81 + 6:  # the carve env's own default; subclasses set theirs from base_obs_size
         cfg.observation_space = base_obs_size(cfg)
     angles = tuple(cfg.binding_angles_deg) if cfg.binding_angles_deg is not None else None
@@ -217,7 +224,7 @@ class CarveEnv(DirectRLEnv):
         joints = self.robot.joint_names
         self.actuated = torch.tensor([i for i, j in enumerate(joints) if not is_passive(self.cfg, j)],
                                      device=self.device)
-        assert len(self.actuated) == self.cfg.action_space, (len(self.actuated), self.cfg.action_space)
+        assert len(self.actuated) == num_dof(self.cfg), (len(self.actuated), num_dof(self.cfg))
         self.bend_id = joints.index("board_flex:1") if self.cfg.board_flex else None
         self.pelvis_id = names.index("pelvis")
         self.torso_id = names.index("torso")
@@ -250,7 +257,13 @@ class CarveEnv(DirectRLEnv):
             legs = [i for i, j in enumerate(self.robot.joint_names) if "hip" in j or "knee" in j]
             scale[legs] = self.cfg.leg_action_scale
         self.action_scale = (scale * 0.5 * (self.joint_upper - self.joint_lower))[self.actuated]
-        self.actions = torch.zeros(self.num_envs, self.cfg.action_space, device=self.device)
+        self.actions = torch.zeros(self.num_envs, num_dof(self.cfg), device=self.device)  # the joint part
+        self.synergy = torch.zeros(self.num_envs, 2, device=self.device)
+        if self.cfg.synergy:
+            self.synergy_rad = torch.zeros(2, len(joints), device=self.device)
+            for row, table in enumerate((self.cfg.synergy_edge_rad, self.cfg.synergy_lean_rad)):
+                for name, rad in table.items():
+                    self.synergy_rad[row, joints.index(name)] = rad
 
     def _scale_to_rider_mass(self, rider_mass: float) -> None:
         """The AMP humanoid is ~36 kg. Scale masses, inertias and joint gains so dynamics stay similar at 65 kg."""
@@ -310,11 +323,18 @@ class CarveEnv(DirectRLEnv):
     # -- stepping ------------------------------------------------------------------------------------------
 
     def _pre_physics_step(self, actions: torch.Tensor):
-        self.actions = actions.clamp(-1.0, 1.0)
+        actions = actions.clamp(-1.0, 1.0)
+        if self.cfg.synergy:
+            self.synergy, actions = actions[:, :2], actions[:, 2:]
+        self.actions = actions
 
     def _apply_action(self):
         target = self.stance_pos.clone()  # the board's spring DoFs keep their rest target: the policy can't drive them
-        target[:, self.actuated] += self.action_scale * self.actions
+        if self.cfg.synergy:
+            target[:, self.actuated] += self.cfg.synergy_residual * self.action_scale * self.actions
+            target += self.synergy @ self.synergy_rad
+        else:
+            target[:, self.actuated] += self.action_scale * self.actions
         target = target.clamp(self.joint_lower, self.joint_upper)
         self.robot.actuators.target_command.set_position_index(value=target)
         self._apply_snow()

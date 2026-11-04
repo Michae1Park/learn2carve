@@ -156,7 +156,7 @@ class SnowboardEnv(CarveEnv):
     def __init__(self, cfg: SnowboardEnvCfg, render_mode: str | None = None, **kwargs):
         if cfg.task not in TASKS:
             raise ValueError(f"unknown task {cfg.task!r}, pick one of: {', '.join(TASKS)}")
-        cfg.observation_space = base_obs_size(cfg) + num_dof(cfg) + TASK_OBS
+        cfg.observation_space = base_obs_size(cfg) + num_dof(cfg) + TASK_OBS + (2 if cfg.synergy else 0)
         n, dev = cfg.scene.num_envs, cfg.sim.device
         # task state must exist before super().__init__, which resets every env
         self.v_cmd = torch.zeros(n, device=dev)  # commanded speed [m/s]
@@ -312,7 +312,8 @@ class SnowboardEnv(CarveEnv):
     def _get_observations(self) -> dict:
         self.prev_actions = self.actions.clone()
         obs = super()._get_observations()["policy"]
-        return {"policy": torch.cat([obs, self.actions, self._task_obs()], dim=-1)}
+        parts = [obs, self.actions, self._task_obs()] + ([self.synergy] if self.cfg.synergy else [])
+        return {"policy": torch.cat(parts, dim=-1)}
 
     def _task_obs(self) -> torch.Tensor:
         psi, beta, yaw = self.path_heading(), self.slip_angle(), self.board_yaw()
@@ -604,6 +605,9 @@ class SnowboardEnv(CarveEnv):
         self.cmd_phase[env_ids] = math.pi * (torch.rand(m, device=self.device) < 0.5).float()  # heel or toe first
         super()._reset_idx(env_ids)
         index_fill_(self.actions, env_ids, 0.0)
+        if self.cfg.synergy:
+            self.synergy = self.synergy.clone()
+            index_fill_(self.synergy, env_ids, 0.0)
         index_fill_(self.prev_actions, env_ids, 0.0)
 
     def _log_episodes(self, env_ids: torch.Tensor):
