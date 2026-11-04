@@ -78,14 +78,54 @@ $$q^* = \operatorname{clip}\!\left(q^{\text{stance}} + 0.25 \cdot \tfrac{1}{2}(q
 
 The policy reaches **±25% of each joint's half-range** around the stance. 50% (the upstream value) flails and falls.
 
+## 6. New rider (opt-in, `--set`)
+
+Each change is a flag on `CarveEnvCfg`; the defaults are the baseline above.
+
+| Flag | Change |
+|---|---|
+| `thoracic=true` | **Second spine joint.** The torso splits into a lumbar segment (4.4 kg) and a chest (12.6 kg) joined by a 2-DoF thoracic joint, `thorax:0` roll (±30°) and `thorax:1` pitch (−30…45°). Neck and shoulders move to the chest. **30 DoF** |
+| `compliant_drives=true` | **Per-group stiffness** instead of one uniform, very stiff drive (damping follows, keeping each joint's damping ratio) |
+| `neck_stiffness_scale=0.5` | Softer neck: the head moves instead of being held rigid |
+| `spine_damping_scale=2` | Extra damping on abdomen + thorax: no torso jerks |
+| `pelvis_mass_frac=0.2` | **Heavy root**: the pelvis carries 20% of the mass (stock 12.6%), the rest scale down to keep 65 kg |
+| `physics_hz=240`, `solver_iterations=[16,4]` | Physics at 240 Hz (decimation 8), fewer solver iterations |
+
+**Spine:**
+
+```
+pelvis ─abdomen (3)─ lumbar ─thorax (2)─ chest ─┬─ neck (3) ─ head
+                                                └─ shoulders (3) ─ arms
+```
+
+**Compliant drives** (stiffness × scale, on top of the mass scaling):
+
+| Group | Hip | Knee | Ankle | Abdomen | Thorax | Shoulder | Elbow | Neck |
+|---|---|---|---|---|---|---|---|---|
+| Scale | 1.0 | 1.0 | 0.7 | 0.5 | 0.5 | 0.3 | 0.3 | 0.4 (× 0.5 neck scale) |
+
+Legs carry the body and stay stiff; the spine, arms and neck give, as a human's do.
+
+### Checks (`scripts/rider_check.py`: stance held 3 s, zero action)
+
+| Model | Worst sag | Falls | Step time |
+|---|---|---|---|
+| Baseline: 120 Hz, 32 / 4 | 0.014 rad | 0% | 1.0× |
+| 240 Hz, 8 / 4 | 0.055 | 0% | 1.1× |
+| 240 Hz, 12 / 4 | 0.023 | 0% | 1.2× |
+| **240 Hz, 16 / 4** | **0.013** | 0% | — |
+| 120 Hz, 12 / 4 | 0.044 | **100%** | 0.6× |
+| **Full new rider + two-half board**, 240 Hz, 16 / 4 | **0.017** (board bend) | 0% | 2.0× (training throughput) |
+
+- **Velocity iterations don't help** (12 / 4 and 12 / 6 are identical).
+- **The split torso first sagged 0.15 rad and fell.** The chest sphere overlaps the pelvis's upper-waist sphere by
+  ~3 cm; once the lumbar segment sat between them they were no longer neighbours, so PhysX pushed them apart every
+  step. The pair is now filtered.
+
 ## Known gaps
 
 | Gap | Effect |
 |---|---|
 | **No torque limits** (effort limit = float max) | Joints are stronger than a human's: balance is easier than it should be |
-| One torso joint | The spine can't curl or twist in two places |
-| Uniform, very stiff drives | No compliance: movement looks stiff, the neck holds the head rigidly |
 | No wrists, no toes | Fine in boots; hands can't counter-balance finely |
 | CoM not observed | The policy must infer its balance from body pose |
-
-**Next:** a 2-DoF thoracic joint (5 torso DoF), retuned neck stiffness, a heavier pelvis, 240 Hz physics.

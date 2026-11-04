@@ -49,12 +49,52 @@ tail). The picture shows the nose on the left.
 Both feet are welded to the board: the front binding is a tree joint, the back one a loop-closing constraint (see
 [humanoid model §3](HUMANOID_MODEL.md#3-board-binding)).
 
-## Not modelled (yet)
+## 4. Two-half board: torsion, camber, flex, progressive sidecut
 
-| Gap | Effect | Status |
-|---|---|---|
-| **Camber** | An unloaded board touches only near its tips; light load holds less edge | Planned |
-| **Flex** | Pressing the board bends it into a tighter arc than the sidecut | Planned |
-| Torsion | Nose and tail can't edge differently | — |
-| Progressive sidecut | Fore/aft weight shift doesn't change the arc | — |
-| Real camber profile in the collision box | One flat 8 mm box | — |
+`--set board_flex=true`. The board becomes **two rigid halves** (nose, tail), each a box of half the length, joined at
+the centre by a spring joint with two DoFs. The policy can't drive it: it bends and twists only under the rider's
+load.
+
+| DoF | Spring | Rest | Effect |
+|---|---|---|---|
+| `board_flex:0` roll | Torsion, 5 N·m/° | 0 | Nose and tail can edge differently |
+| `board_flex:1` pitch | Bend, set so $N_c$ presses it flat | $-\varphi_0$ (camber) | Unloaded, only the tips touch |
+
+$$\varphi_0 = \frac{4h}{L} \quad (h = 5\text{ mm camber}) \qquad k_{\text{bend}} = \frac{N_c\,L}{4\,\varphi_0} \quad (N_c = 330\text{ N} \approx \tfrac{1}{2}\,mg)$$
+
+The two angled boxes are a two-segment **camber profile**: the collision shape itself bends, instead of one flat
+8 mm box.
+
+Each half glides and grips on **its own edge angle $\theta_i$ and load $N_i$** (from its own contact sensor). Steering
+is one arc for the whole board:
+
+$$\kappa = \underbrace{\frac{c}{R(s)\cos\bar\theta}}_{\text{sidecut}} + \underbrace{(N - N_c)_+\,\frac{L}{6\,EI}\,\sin\lvert\bar\theta\rvert}_{\text{flex}}$$
+
+| Symbol | Meaning |
+|---|---|
+| $\bar\theta = \sum_i w_i\theta_i$ | Load-weighted edge angle, $w_i = N_i / N$ (**torsion**) |
+| $s = w_{\text{nose}} - w_{\text{tail}}$ | Centre of pressure, −1 (all tail) … +1 (all nose) |
+| $R(s) = R_{sc} + (R_{\text{tip}} - R_{sc})\,s^2$ | **Progressive sidecut**: 7.6 m centred, 10.7 m at a tip |
+| $c = 1 + q_{\text{bend}}/\varphi_0 \in [0, 1]$ | **Camber** pressed flat: 0 at rest (tips only, no sidecut), 1 flat (from the joint angle) |
+| $EI = 1500$ N·m² | **Flex**: load beyond $N_c$ bends the board into a tighter arc |
+
+### Validation (`scripts/validate_board.py`)
+
+![Two-half board validation: flex, progressive sidecut and torsion, sim vs formula](snow/board_validation.png)
+
+| Check | Sim / formula |
+|---|---|
+| **Flex**: radius vs load (θ = 40°) | 5.85 / 5.82 m at 0.4 mg, 3.99 / 3.95 m at 2 mg |
+| **Progressive sidecut**: radius vs centre of pressure (θ = 20°) | 7.15 / 7.14 m centred, 10.06 / 10.05 m all on one half |
+| **Torsion**: radius vs tail edge (nose 35°) | 6.24 / 6.23 m untwisted, 7.03 / 7.02 m with the tail at 10° |
+
+In the rider, standing still: body weight (664 N) presses the camber flat ($c$ = 0.99), with 56–59% of the load on the
+nose (the front knee is bent more).
+
+## Still not modelled
+
+| Gap | Effect |
+|---|---|
+| Continuous flex | Two segments, one hinge: no bending within a half |
+| Reverse camber on snow | A rigid half can't sink into the snow: flex beyond flat is analytic, not geometric |
+| Snow deformation | Hardpack only: no edge penetration that grows with load |

@@ -5,8 +5,8 @@
     scripts/py playground/snowboard/play.py <run> --livestream 2 --follow    # camera tracks the rider
     scripts/py playground/snowboard/play.py --no_policy --task sideslip      # stance held, zero actions
 
-Play is a series of short runs, each starting the same way (piste centre, phase 0, mid-range speed and turn length)
-and ending --run_length metres down (default two S's; 25 m for the side slip). The rider then returns to the top.
+Play is a series of short runs, each starting the same way (piste centre, straight down, mid-range speed command)
+and ending --run_length metres down (default 100 m; 25 m for the side slip). The rider then returns to the top.
 --seconds is the total play time. One line is printed per run (env 0), and the longest run's track is saved to
 <run>/trail.png.
 
@@ -57,42 +57,41 @@ import isaaclab.sim as sim_utils
 
 
 class RunStats:
-    """Averages over one run of env 0, printed as one line."""
+    """Averages over one run of env 0, printed as one line. Turns come from the env's own counter (linked turns)."""
 
-    HEADER = "run  end    seconds  speed  |edge|°  heading_err°  slip_err°  line_err_m  max|y|_m  turns"
+    HEADER = "run  end    seconds  speed (cmd)  |edge|°  slip_err°  |heading|°  max|y|_m  turns  m/turn"
 
     def __init__(self):
         self.steps = 0
-        self.sums = dict.fromkeys(("speed", "edge", "heading_err", "slip_err", "line_err"), 0.0)
+        self.sums = dict.fromkeys(("speed", "edge", "slip_err", "heading"), 0.0)
         self.max_y = 0.0
+        self.x0 = self.x = 0.0
+        self.turns = 0
+        self.v_cmd = 0.0
         self.rows = []  # per step: x, y, speed, slip°, edge° (saved as ride.csv for the longest run)
-        self.turns = 0  # each time the path crosses the fall line
-        self.side = 0  # which side of the fall line the path points to: -1, 0 (unknown yet), 1
 
     def add(self, env):
-        t = env.tracking()
-        heading = env.path_heading()[0].item()
-        side = 1 if heading > 0.05 else (-1 if heading < -0.05 else 0)
-        if side and self.side and side != self.side:
-            self.turns += 1
-        self.side = side or self.side
-
+        x, y = env.position()[0].tolist()
+        if self.steps == 0:
+            self.x0 = x
         self.steps += 1
+        self.x = x
+        self.turns = int(env.turn_count[0].item())
+        self.v_cmd = env.v_cmd[0].item()
         self.sums["speed"] += env.board_speed()[0].item()
         self.sums["edge"] += abs(math.degrees(env.snow_info["edge_angle"][0].item()))
-        self.sums["heading_err"] += abs(math.degrees(t.e_heading[0].item()))
-        self.sums["slip_err"] += abs(math.degrees(t.e_slip[0].item()))
-        self.sums["line_err"] += abs(t.e_line[0].item())
-        self.max_y = max(self.max_y, abs(env.position()[0, 1].item()))
-        x, y = env.position()[0].tolist()
+        self.sums["slip_err"] += abs(math.degrees(env.slip_error()[0].item()))
+        self.sums["heading"] += abs(math.degrees(env.path_heading()[0].item()))
+        self.max_y = max(self.max_y, abs(y))
         self.rows.append((x, y, env.board_speed()[0].item(), math.degrees(env.slip_angle()[0].item()),
                           math.degrees(env.snow_info["edge_angle"][0].item())))
 
     def line(self, number: int, end: str, step_dt: float) -> str:
         mean = {k: v / max(self.steps, 1) for k, v in self.sums.items()}
-        return (f"{number:3d}  {end:5s}  {self.steps * step_dt:7.1f}  {mean['speed']:5.1f}  {mean['edge']:6.1f}  "
-                f"{mean['heading_err']:12.1f}  {mean['slip_err']:9.1f}  {mean['line_err']:10.2f}  "
-                f"{self.max_y:8.1f}  {self.turns:5d}")
+        per_turn = f"{(self.x - self.x0) / self.turns:6.1f}" if self.turns else "     -"
+        return (f"{number:3d}  {end:5s}  {self.steps * step_dt:7.1f}  {mean['speed']:5.1f} ({self.v_cmd:4.1f})  "
+                f"{mean['edge']:6.1f}  {mean['slip_err']:9.1f}  {mean['heading']:10.1f}  {self.max_y:8.1f}  "
+                f"{self.turns:5d}  {per_turn}")
 
 
 def main():
@@ -107,7 +106,7 @@ def main():
         from playground.snowboard.env import SnowboardEnv, SnowboardEnvCfg
         from playground.snowboard.trail import SnowTrail
 
-        overrides, wavelength, run_length = play_overrides(run["overrides"], SnowboardEnvCfg(task=task))
+        overrides, run_length = play_overrides(run["overrides"], SnowboardEnvCfg(task=task))
         env_cfg = SnowboardEnvCfg(task=task)
         if args.record:
             Recorder.add_cameras(env_cfg)
@@ -123,7 +122,7 @@ def main():
         trail = SnowTrail(board["length"], board["waist_width"], raw_env.q_slope)
 
         print(f"\n[play] task={task}  {'no policy' if args.no_policy else args.run.name}  run {run_length:.0f} m, "
-              f"turn length {wavelength:.0f} m, fence ±{raw_env.cfg.fence_half_width:.0f} m")
+              f"speed command {raw_env.v_cmd[0].item():.1f} m/s, fence ±{raw_env.cfg.fence_half_width:.0f} m")
         print(f"[play] {RunStats.HEADER}")
         recorder = Recorder(raw_env, trail) if args.record else None
         longest_secs, longest_marks, rows = ride(env, raw_env, agent, trail, recorder)
@@ -133,19 +132,17 @@ def main():
             recorder.save(args.record)
 
         trail.marks = longest_marks
-        swing, phase = raw_env.swing[0].item(), raw_env.phase[0].item()
-        trail.save_png(out, f"{task}: {longest_secs:.1f} s, turn length {wavelength:.0f} m",
-                       line=lambda x: swing * math.sin(2 * math.pi * x / wavelength + phase),
+        trail.save_png(out, f"{task}: {longest_secs:.1f} s at {raw_env.v_cmd[0].item():.1f} m/s commanded",
                        fence=raw_env.cfg.fence_half_width, x_end=run_length)
         print(f"[play] track of the longest episode ({longest_secs:.1f} s) -> {out}")
         env.close()
 
 
-def play_overrides(run_overrides: dict, defaults) -> tuple[dict, float, float]:
-    """Env overrides for short, repeatable runs. Returns (overrides, turn length, run length).
+def play_overrides(run_overrides: dict, defaults) -> tuple[dict, float]:
+    """Env overrides for short, repeatable runs. Returns (overrides, run length).
 
     Training's cfg is the base; --set wins over everything. Unless set, every run starts the same way: mid-range
-    speed and turn length, on the piste centre (phase 0) swinging out.
+    speed command, on the piste centre, pointing straight down the fall line.
     """
     user = parse_overrides(args.set)
     overrides = run_overrides | user
@@ -156,18 +153,15 @@ def play_overrides(run_overrides: dict, defaults) -> tuple[dict, float, float]:
 
     if "speed_cmd" not in user:
         overrides["speed_cmd"] = (middle("speed_cmd"),) * 2
-    wavelength = middle("turn_length")
-    if "turn_length" not in user:
-        overrides["turn_length"] = (wavelength,) * 2
-    if "fixed_phase" not in user:
-        overrides["fixed_phase"] = 0.0
+    if "start_heading_deg" not in user:
+        overrides["start_heading_deg"] = 0.0
 
-    run_length = args.run_length or (25.0 if defaults.task == "sideslip" else 2 * wavelength)
+    run_length = args.run_length or (25.0 if defaults.task == "sideslip" else 100.0)
     overrides["run_length"] = run_length
     overrides["episode_length_s"] = 60.0  # runs end by distance; this only catches a rider who stops
     if not args.follow:
         overrides["viewer"] = free_view_cfg(overrides.get("slope_deg"), args.cam_x or run_length + 10.0)
-    return overrides, wavelength, run_length
+    return overrides, run_length
 
 
 def ride(env, raw_env, agent, trail, recorder=None) -> tuple[float, list, list]:

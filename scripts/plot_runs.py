@@ -1,8 +1,7 @@
 """Learning curves (mean ± std over seeds) from the snowboard runs' TensorBoard logs, plus a markdown table.
 
     scripts/py scripts/plot_runs.py                       # main tasks      -> docs/results/learning_curves.png
-    scripts/py scripts/plot_runs.py --set ablation        # reward ablation -> docs/results/ablation_slip.png
-    scripts/py scripts/plot_runs.py --set carve_speed     # carve speed fix -> docs/results/carve_speed_curves.png
+    scripts/py scripts/plot_runs.py --set model           # baseline vs new model -> docs/results/model_curves.png
 
 A group is every run in logs/playground/snowboard/ with a `seed` in run.yaml and exactly the group's task and
 overrides. The table is the mean over each run's last 10% of training, then mean ± std over seeds.
@@ -24,28 +23,28 @@ ROOT = Path(__file__).resolve().parents[1]
 LOGS = ROOT / "logs/playground/snowboard"
 OUT = ROOT / "docs/results"
 
+NEW_MODEL = {  # the new rider + board (docs/HUMANOID_MODEL.md, docs/BOARD_MODEL.md)
+    "thoracic": True, "compliant_drives": True, "board_flex": True, "physics_hz": 240, "solver_iterations": [16, 4],
+    "pelvis_mass_frac": 0.2, "neck_stiffness_scale": 0.5, "spine_damping_scale": 2,
+}
 # label: (task, overrides, colour)
 SETS = {
     "main": {
-        "Carve": ("carve", {"slope_deg": 10}, "#d62728"),
-        "Skid": ("skid", {"slope_deg": 10}, "#2ca02c"),
+        "Carve": ("carve", {}, "#d62728"),
+        "Skid": ("skid", {}, "#2ca02c"),
         "Side slip": ("sideslip", {}, "#1f77b4"),
     },
-    "ablation": {
-        "Carve (full reward)": ("carve", {"slope_deg": 10}, "#d62728"),
-        "Carve, no slip reward": ("carve", {"slope_deg": 10, "rew_slip": 0}, "#7f7f7f"),
-    },
-    "carve_speed": {
-        "Carve, before": ("carve", {"slope_deg": 10}, "#d62728"),
-        "Carve, after": None,  # filled from --after (overrides of the fix), see main()
+    "model": {
+        "Baseline model": ("carve", {}, "#7f7f7f"),
+        "New model": ("carve", dict(NEW_MODEL), "#d62728"),
     },
 }
 METRICS = [  # tag, title, y label
     ("Episode_Snow/seconds", "Episode length (12 s max)", "s"),
     ("Episode_Termination/fell", "Falls", "fraction of episodes"),
+    ("Episode_Snow/turns_per_10s", "Linked turns", "per 10 s"),
     ("Episode_Snow/err_slip_deg", "Slip error", "°"),
-    ("Episode_Snow/err_line_m", "Distance from the line", "m"),
-    ("Episode_Snow/speed", "Speed", "m/s"),
+    ("Episode_Snow/err_speed", "Speed error", "m/s"),
 ]
 
 
@@ -69,11 +68,8 @@ def load(run_dir: Path, tags: list[str]) -> dict[str, tuple[np.ndarray, np.ndarr
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--set", choices=list(SETS), default="main")
-    parser.add_argument("--after", default="{}", help="carve_speed: overrides of the fixed carve, as YAML")
     args = parser.parse_args()
-    groups = dict(SETS[args.set])
-    if args.set == "carve_speed":
-        groups["Carve, after"] = ("carve", yaml.safe_load(args.after), "#9467bd")
+    groups = SETS[args.set]
 
     tags = [m[0] for m in METRICS]
     fig, axes = plt.subplots(1, len(METRICS), figsize=(3.3 * len(METRICS), 3.0))
@@ -104,7 +100,7 @@ def main():
     axes[0].legend(frameon=False, fontsize=8, loc="lower right")
     fig.tight_layout()
     OUT.mkdir(parents=True, exist_ok=True)
-    name = {"main": "learning_curves", "ablation": "ablation_slip", "carve_speed": "carve_speed_curves"}[args.set]
+    name = {"main": "learning_curves", "model": "model_curves"}[args.set]
     fig.savefig(OUT / f"{name}.png", dpi=130)
     print(f"[plot] -> {OUT / name}.png\n")
 

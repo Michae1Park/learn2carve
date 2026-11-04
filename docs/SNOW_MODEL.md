@@ -86,7 +86,6 @@ has no grip).
 
 | Left out | Effect |
 |---|---|
-| Progressive sidecut (10.7 / 6.8 / 10.7 m) | One radius: fore/aft weight shift doesn't change the arc |
-| Board flex, camber | No pressing the board into a tighter arc |
+| Progressive sidecut, flex, camber, torsion | One rigid board. **Modelled** with the two-half board (`board_flex=true`): see [board model §4](BOARD_MODEL.md#4-two-half-board-torsion-camber-flex-progressive-sidecut) |
 | Snow conditions | One groomed hardpack: no powder, ice or ruts |
 | Terrain | Physics is one tilted plane; the mountain is visual only. Everything is in the slope frame, so tilted terrain and tilted gravity give identical results |
