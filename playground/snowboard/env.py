@@ -444,7 +444,9 @@ class SnowboardEnv(CarveEnv):
                 torso_ref = cfg.pose_ref_com * legs_ref
                 sig = math.radians(cfg.pose_ref_sigma_deg)
                 match = torch.exp(-((legs - legs_ref) / sig).square()) * torch.exp(-((torso - torso_ref) / sig).square())
-                r = cfg.rew_pose_ref * match * self.step_dt
+                # nothing while the command is near flat: riding straight matched it at every crossing for free
+                on_edge = (self.edge_command().abs() > math.radians(10.0)).float()
+                r = cfg.rew_pose_ref * match * on_edge * self.step_dt
                 reward += r
                 self._track("rew_pose_ref", r)
                 self._track("legs_lean_deg", legs.rad2deg() * torch.sign(self.edge_command()))
