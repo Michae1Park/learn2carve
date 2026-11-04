@@ -227,3 +227,6 @@ envs/assets/src/
 
 # Isaac Sim WebRTC streamer traces
 *.etli
+
+# local reference material (photos and video of real carving): never pushed
+reference-image/

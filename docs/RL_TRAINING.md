@@ -22,7 +22,7 @@ its rhythm) is *learned*: it comes out of the physics of speed, slope, edge angl
 |---|---|
 | Path heading | $\psi = \operatorname{atan2}(v_y, v_x)$: travel direction, 0 = straight down the fall line |
 | Slip angle | $\beta = \operatorname{atan2}(v_\perp, v_\parallel)$: angle between the board's axis and its travel |
-| **Linked turn** | $\psi$ crosses the fall line after swinging $\lvert\psi\rvert \ge 80°$ to one side: a big fat S, each turn finished nearly across the hill |
+| **Linked turn** | $\psi$ crosses the fall line after swinging $\lvert\psi\rvert \ge 55°$ to one side: each turn finishes 50–60° across the hill (80° sent the rider back up the hill) |
 
 **Why turns emerge.** Training runs on a **15° slope**. Going straight down it runs to ~24 m/s ([snow model §4](SNOW_MODEL.md)). Commanded
 8–11 m/s and capped at 12 m/s, the rider must spend part of each turn heading across the hill, where gravity pulls less. How far across,
@@ -84,12 +84,15 @@ $$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{turn}}\,\mathbb{1}[\text{turn}] \
 | **Traverse** | clip$\big((t_{\text{since turn}} - 3\,\text{s})/3\,\text{s},\ 0,\ 1\big)$: no completed turn for a while | −3.0 |
 | **Height** | $e^{-((h - h^*)/0.1)^2}$, $h^* = 0.50 - 0.25\operatorname{clip}(\lvert\theta\rvert/45°)$: tall at the edge change, low at the apex | 1.0 |
 | **Arm** | the two hands' height difference / 0.5 m × edge: one hand low, one high | 0.5 |
-| **Swing** | $\operatorname{clip}(\lvert\psi\rvert/80°)\cdot\operatorname{clip}(\lvert\theta\rvert/40°)\cdot$ turning: heading across the hill while carving, the slope up to the turn bonus | 2.0 |
+| **Swing** | $\operatorname{clip}(\lvert\psi\rvert/55°)\cdot\operatorname{clip}(\lvert\theta\rvert/40°)\cdot$ turning: heading across the hill while carving, the slope up to the turn bonus | 2.0 |
 | **Edge rate** | $\operatorname{clip}((\lvert\dot\theta\rvert - 2)/2,\ 0,\ 1)$: edge chatter (a fast flip bled speed without turning) | −2.0 |
 | **Bow** | torso inclination from the snow normal / (45° + 20° × edge fraction), 0 by 80° (lying): the upper body bows down toward the apex | 1.0 |
+| **Uphill** | $\operatorname{clip}((\lvert\psi\rvert - 90°)/15°,\ 0,\ 1)$: heading back up the hill after a turn | −5.0 |
+| **Hips back** | the pelvis behind the feet's midpoint along the board, clip(offset / 0.10 m): the hips push toward the tail, loading the back foot | 1.0 |
+| **Balance** | $e^{-((s_{\text{back}} - 0.5)/0.15)^2}$, $s_{\text{back}}$ the share of the centre of mass between the feet (0 front foot, 1 back foot): the bowed torso balances the hips | 1.0 |
 | **Carve** | $\underbrace{\operatorname{clip}(\lvert\bar\theta\rvert/40°)}_{\text{edged}} \cdot \underbrace{\operatorname{clip}(\lvert\dot\psi_{\text{board}}\rvert/0.5\text{ rad/s})}_{\text{turning}} \cdot \underbrace{e^{-(\beta/15°)^2}}_{\text{clean}} \cdot (0.5 + 0.5\,\text{low})$: full at 40° and up | 2.0 |
 | **Low** | Pelvis above the board, always: ramps from 0 at the 0.80 m stance to full at 0.45 m (full to 0.25 m), never sit down (0 at 0.12 m) | 1.0 |
-| **Turn** | At each fall-line crossing: $\operatorname{clip}\big((\text{swing} - 30°)/(85° - 30°),\ 0,\ 1\big)$: deeper turns pay more, full at 85° | 5.0 |
+| **Turn** | At each fall-line crossing: $\operatorname{clip}\big((\text{swing} - 25°)/(60° - 25°),\ 0,\ 1\big)$: deeper turns pay more, full at 60° | 5.0 |
 | **Fall** | Once, a fall or a fence | −10 |
 | Guide | $e^{-((\psi - \psi_{\text{guide}})/30°)^2}$ × adaptive fade | 4.0 → 0 |
 | Action rate | $\lVert a_t - a_{t-1} \rVert^2$ | −0.01 |

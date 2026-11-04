@@ -29,6 +29,7 @@ parser.add_argument("--ankle_y", type=float, default=-0.25, help="initial guess:
 parser.add_argument("--guess_from", type=Path, default=None,
                     help="start the settle from another stance file's joint angles (lower the hip step by step)")
 parser.add_argument("--back", type=float, default=0.0, help="hips pushed back [m] along the board's width (+/-: try both)")
+parser.add_argument("--tail", type=float, default=0.0, help="hips shifted toward the tail [m] along the board (loads the back foot)")
 parser.add_argument("--pitch", type=float, default=0.0, help="pelvis hinged forward [deg] about its own y axis (+/-)")
 parser.add_argument("--twist", type=float, default=0.0, help="torso twist abdomen_z [rad]: opens the chest toward the nose")
 parser.add_argument("--tag", default="", help="write a stance variant, e.g. squat: stance[_<front>_<back>]_<tag>.yaml")
@@ -61,7 +62,7 @@ def main():
     board_z = 0.5  # pin the board in the air; gravity is off
     board_pose = ((0.0, 0.0, board_z), (1.0, 0.0, 0.0, 0.0))  # wxyz for USD
     pelvis_yaw = math.radians(-90.0 + args.open_deg)
-    pelvis_pos = (board["setback"], args.back, board_z + board_top + args.hip_height)
+    pelvis_pos = (board["setback"] - args.tail, args.back, board_z + board_top + args.hip_height)
     sz, cz = math.sin(pelvis_yaw / 2), math.cos(pelvis_yaw / 2)
     sy, cy = math.sin(math.radians(args.pitch) / 2), math.cos(math.radians(args.pitch) / 2)
     # yaw about z, then hinge about the pelvis's own y: q = q_yaw * q_pitch (xyzw)
@@ -142,6 +143,14 @@ def main():
         chest = flat(quat_apply(quat[names.index("torso")], torch.tensor([1.0, 0.0, 0.0], device=pos.device)))
         nose = flat(quat_apply(bq, torch.tensor([1.0, 0.0, 0.0], device=pos.device)))
         cyaw = math.degrees(math.atan2(torch.cross(nose, chest, dim=-1)[2].item(), (nose * chest).sum().item()))
+        rf, lf = pos[names.index("right_foot")], pos[names.index("left_foot")]
+        t_ = flat(rf - lf)
+        mass = robot.data.body_mass.torch[0]
+        keep = [i for i, n in enumerate(names) if not n.startswith("board")]
+        com = (pos[keep] * mass[keep].view(-1, 1)).sum(0) / mass[keep].sum()
+        span = ((rf - lf) * t_).sum().item()
+        parts.append(f"hip_tail {((pos[pi_] - (rf + lf) / 2) * t_).sum().item():+.2f} m (+ = toward the tail)")
+        parts.append(f"back_load {((com - lf) * t_).sum().item() / span:.2f}")
         parts.append(f"chest_yaw {cyaw:+.0f} deg")
         print("[stance] squat: " + ", ".join(parts))
 

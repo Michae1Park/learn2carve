@@ -44,9 +44,9 @@ class SnowboardEnvCfg(CarveEnvCfg):
     speed_cmd = (0.5, 2.5)  # m/s, sampled per episode (turn tasks: see __post_init__)
     # a turn counts once the path swung this far to one side and crossed back over the fall line. 15° was gamed:
     # ±15° wiggles every 0.7 s collected the bonus without slowing down; 45° is a real turn, across the hill
-    min_turn_deg = 80.0  # a big fat S: each turn finishes nearly across the hill (45 still rode a narrow S)
-    turn_bonus_from_deg = 30.0  # the turn bonus ramps from here ...
-    turn_bonus_full_deg = 85.0  # ... to full here, so deeper turns always pay more and early half-turns still teach
+    min_turn_deg = 55.0  # a turn finishes 50-60° across the hill (80° was too much: the rider headed back up the hill)
+    turn_bonus_from_deg = 25.0  # the turn bonus ramps from here ...
+    turn_bonus_full_deg = 60.0  # ... to full here, so deeper turns always pay more and early half-turns still teach
     skid_slip_deg = 20.0  # skid: slip angle to hold
     start_heading_deg = 20.0  # turn tasks: start heading sampled in ± this from the fall line
     fence_half_width = FENCE_HALF_WIDTH  # m; crossing it ends the episode
@@ -87,6 +87,9 @@ class SnowboardEnvCfg(CarveEnvCfg):
     height_sigma = 0.10
     rew_swing = 2.0  # carve: heading across the hill while edged: clip(|heading| / min_turn) × clip(edge / edge_target). The turn bonus only pays at 80°; this is the slope to it
     rew_edge_rate = -2.0  # turn tasks: flipping the edge faster than ~2 rad/s (chatter): clip((|d edge/dt| - 2) / 2, 0, 1)
+    rew_hip_tail = 1.0  # turn tasks: hips pushed back toward the tail, behind the feet's midpoint along the board: clip(offset / 0.10 m)
+    rew_balance = 1.0  # turn tasks: centre of mass between the feet, front/back load split ~50/50 (static estimate): exp(-((back share - 0.5) / 0.15)²)
+    rew_uphill = -5.0  # turn tasks: heading more than 90° from the fall line is riding back up the hill: clip((|heading| - 90°) / 15°, 0, 1)
     rew_bow = 1.0  # turn tasks: upper body bowed forward, torso inclined from the snow normal: 45° flat -> 65° at 45° edge; 0 by 80° (lying)
     rew_arm = 0.5  # turn tasks: one hand low, the other high (the outside arm lifts for balance) while edged
     rew_hand = 1.0  # turn tasks: the lowest hand near the snow while edged (the hand drags at the apex, hangs low at the edge change)
@@ -279,6 +282,7 @@ class SnowboardEnv(CarveEnv):
         edge = self.edge_ema.abs()  # the held edge: flipping it back and forth (chatter) averages out to nothing
         clean = torch.exp(-(self.slip_angle() / math.radians(cfg.sigma_slip_deg)).square())
         tech = self._technique() if turns else {}  # also logs pelvis height and angulation
+        hip_tail, back_share = self.stance_balance() if turns else (zeros, zeros)
         terms = {
             "alive": (~self.reset_terminated).float(),
             "speed": torch.exp(-((speed - self.v_cmd) / cfg.sigma_speed).square()),
@@ -301,6 +305,9 @@ class SnowboardEnv(CarveEnv):
             "swing": ((psi.abs() / self.min_turn).clamp(0.0, 1.0) * (edge / math.radians(cfg.edge_target_deg)).clamp(0.0, 1.0)
                       * self.path_turning() if cfg.task == "carve" else zeros),
             "edge_rate": ((self.edge_rate.abs() - 2.0) / 2.0).clamp(0.0, 1.0) if turns else zeros,
+            "hip_tail": (hip_tail / 0.10).clamp(0.0, 1.0) if turns else zeros,
+            "balance": torch.exp(-((back_share - 0.5) / 0.15).square()) if turns else zeros,
+            "uphill": ((psi.abs() - math.radians(90.0)) / math.radians(15.0)).clamp(0.0, 1.0) if turns else zeros,
             "traverse": ((self.since_turn - cfg.traverse_after_s) / cfg.traverse_ramp_s).clamp(0.0, 1.0) if turns else zeros,
             "height": (torch.exp(-((self.pelvis_height() - (0.50 - 0.25 * (edge / math.radians(45.0)).clamp(0.0, 1.0)))
                                    / cfg.height_sigma).square()) if turns else zeros),
@@ -353,6 +360,30 @@ class SnowboardEnv(CarveEnv):
         apex of a deep carve), then 0 at 0.12 m (sitting). The ramp starts at the stance so a standing rider feels a gradient."""
         h = self.pelvis_height()
         return ((0.80 - h) / 0.35).clamp(0.0, 1.0) * ((h - 0.12) / 0.13).clamp(0.0, 1.0)
+
+    def stance_balance(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """(hips behind the feet's midpoint along the board [m], share of the weight on the back foot [0..1]).
+
+        t points from the front foot (left, toward the nose) to the back foot (right, toward the tail). The share is
+        static: where the rider's centre of mass sits between the feet, 0 = over the front foot, 1 = over the back
+        foot (it ignores accelerations, so it is a proxy for the front/back load split)."""
+        if not hasattr(self, "_com_ids"):
+            mass = self.robot.data.body_mass.torch[0]
+            self._com_ids = [i for i in range(mass.shape[0]) if i not in self.board_ids]
+            self._com_mass = mass[self._com_ids]
+        back, front = self.body_pos(self.key_ids[2]), self.body_pos(self.key_ids[3])
+        t = back - front
+        t = t - (t * self.up).sum(-1, keepdim=True) * self.up
+        span = t.norm(dim=-1).clamp_min(0.2)
+        t = t / span.unsqueeze(-1)
+        mid = (back + front) / 2
+        hip_tail = ((self.body_pos(self.pelvis_id) - mid) * t).sum(-1)
+        pos = self.body_pos(self._com_ids)
+        com = (pos * self._com_mass.view(1, -1, 1)).sum(1) / self._com_mass.sum()
+        share = (((com - front) * t).sum(-1) / span).clamp(0.0, 1.0)
+        self._track("load_back", share)
+        self._track("hip_tail_m", hip_tail)
+        return hip_tail, share
 
     def torso_incline(self) -> torch.Tensor:
         """Angle of the torso axis from the snow normal [rad]: 0 upright, ~80° is lying (a fall)."""
