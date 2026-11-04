@@ -349,6 +349,7 @@ class SnowboardEnv(CarveEnv):
         on_side = self.snow_info["edge_angle"].abs() > math.radians(85.0) if self.snow_info else torch.zeros_like(lying)
         # nose first, always: riding tail first (reverse / switch carving) ends the episode as a fall
         reverse = (self.slip_angle().abs() > math.radians(self.cfg.reverse_slip_deg)) & (self.board_speed() > 2.0)
+        self.fall_why = torch.stack([fallen, lying, sitting, on_side, reverse], -1)  # logged per episode end
         fallen = fallen | lying | sitting | on_side | reverse
         x, y = self.position().unbind(-1)
         self.out_of_bounds = y.abs() > self.cfg.fence_half_width
@@ -644,6 +645,9 @@ class SnowboardEnv(CarveEnv):
         log["Episode_Termination/fell"] = (self.reset_terminated[env_ids] & ~self.out_of_bounds[env_ids]).float().mean()
         log["Episode_Termination/fence"] = self.out_of_bounds[env_ids].float().mean()
         log["Episode_Snow/seconds"] = seconds.mean()
+        if hasattr(self, "fall_why"):
+            for i, why in enumerate(("height", "lying", "sitting", "on_side", "reverse")):
+                log[f"Episode_Termination/why_{why}"] = self.fall_why[env_ids, i].float().mean()
         log["Guide/level"] = torch.tensor(self.guide_fade())
         log["EdgeCmd/level"] = torch.tensor(self.cmd_level)
         log["Guide/err_ema_deg"] = torch.tensor(self.guide_err_ema)
