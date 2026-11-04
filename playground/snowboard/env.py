@@ -104,7 +104,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     pose_ref_sigma_deg = 15.0
     edge_cmd_amp_deg = (20.0, 50.0)  # level 0 -> 1
     edge_cmd_period_s = (4.6, 4.0)  # one full S (two edges, a turn every ~2 s), level 0 -> 1; ±15 % per episode
-    edge_cmd_hold = 1.8  # trapezoid sharpness: clamp(hold · sin, -1, 1)
+    edge_cmd_sharpness = 1.8  # trapezoid sharpness: clamp(hold · sin, -1, 1)
     edge_cmd_level_up_deg = 12.0  # mean tracking error below this raises the level, above 2× lowers it
     edge_cmd_level_steps = 2000  # steps to go from level 0 to 1 at best
     switch_flat_deg = 5.0  # an edge change only counts if the board went flat on its base (raw |edge| < this) in between
@@ -260,7 +260,7 @@ class SnowboardEnv(CarveEnv):
         amp = math.radians(cfg.edge_cmd_amp_deg[0] + lv * (cfg.edge_cmd_amp_deg[1] - cfg.edge_cmd_amp_deg[0]))
         t = self.episode_length_buf.float() * self.step_dt + ahead_s
         arg = 2 * math.pi * t / self.cmd_period + self.cmd_phase
-        return amp * (cfg.edge_cmd_hold * arg.sin()).clamp(-1.0, 1.0)
+        return amp * (cfg.edge_cmd_sharpness * arg.sin()).clamp(-1.0, 1.0)
 
     def _adapt_edge_cmd(self, err_deg: torch.Tensor):
         alive = ~self.reset_terminated
