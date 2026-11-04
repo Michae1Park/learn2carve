@@ -29,7 +29,7 @@ from envs.carve_env import CarveEnv, CarveEnvCfg, base_obs_size, num_dof
 from envs.mountain import FENCE_HALF_WIDTH
 
 TASKS = ("sideslip", "skid", "carve")
-TASK_OBS = 16  # see _task_obs
+TASK_OBS = 19  # see _task_obs
 
 
 @configclass
@@ -82,6 +82,17 @@ class SnowboardEnvCfg(CarveEnvCfg):
                    # down (0 at 0.12 m: an ungated version was gamed by leaning back)
     rew_edge_switch = 10.0  # turn tasks: per edge change, the held edge (smoothed, ≥20°) flips from heel to toe or back
     reverse_slip_deg = 100.0  # |slip angle| beyond this at speed = riding tail first: a fall (never allowed)
+    # edge command (carve): instead of hoping the policy finds the edge change, command a signed edge angle that
+    # rolls heel -> base -> toe on a timer and reward tracking it. Trapezoid: holds ±amp, crosses 0 (the base) between.
+    # Curriculum: level 0 -> 1 moves amp and period from the easy to the hard end while the tracking error is low.
+    edge_cmd: bool = False
+    rew_edge_cmd = 6.0  # exp(-((θ - θ*) / σ)²)
+    edge_cmd_sigma_deg = 12.0
+    edge_cmd_amp_deg = (20.0, 50.0)  # level 0 -> 1
+    edge_cmd_period_s = (4.5, 2.6)  # one full S (two edges), level 0 -> 1; ±15 % per episode
+    edge_cmd_hold = 1.8  # trapezoid sharpness: clamp(hold · sin, -1, 1)
+    edge_cmd_level_up_deg = 12.0  # mean tracking error below this raises the level, above 2× lowers it
+    edge_cmd_level_steps = 2000  # steps to go from level 0 to 1 at best
     switch_flat_deg = 5.0  # an edge change only counts if the board went flat on its base (raw |edge| < this) in between
     rew_wrong_edge = -4.0  # turn tasks: held edge on the side that turns the wrong way for the S (heel when it needs toe and back): clip(angle / 30°)
     rew_release = 2.0  # turn tasks: once the turn has swung (≥30-55°), rolling the held edge toward the OTHER side, dense: clip(roll rate / 1 rad/s)
@@ -160,6 +171,10 @@ class SnowboardEnv(CarveEnv):
         self.guide_y = torch.zeros(n, device=dev)  # its swing Y [m]
         self.guide_phase = torch.zeros(n, device=dev)
         self.guide_level = 1.0  # adaptive fade, see guide_fade()
+        self.cmd_period = torch.ones(n, device=dev)  # edge command: this episode's period [s] and phase
+        self.cmd_phase = torch.zeros(n, device=dev)
+        self.cmd_level = 0.0
+        self.cmd_err_ema = 90.0
         self.guide_err_ema = 90.0  # deg, running mean of the guide heading error over all envs
         self.prev_actions = torch.zeros(n, num_dof(cfg), device=dev)
         self.out_of_bounds = torch.zeros(n, dtype=torch.bool, device=dev)
@@ -217,6 +232,26 @@ class SnowboardEnv(CarveEnv):
         arg = self.guide_k * x + self.guide_phase
         y_ref = self.guide_y * arg.sin()
         return torch.atan(self.guide_y * self.guide_k * arg.cos()) - torch.atan((y - y_ref) / self.cfg.guide_lookahead)
+
+    def edge_command(self, ahead_s: float = 0.0) -> torch.Tensor:
+        """Commanded signed edge angle [rad] (θ < 0 heel, > 0 toe), `ahead_s` seconds from now (0 if off)."""
+        if not self.cfg.edge_cmd:
+            return torch.zeros(self.num_envs, device=self.device)
+        lv, cfg = self.cmd_level, self.cfg
+        amp = math.radians(cfg.edge_cmd_amp_deg[0] + lv * (cfg.edge_cmd_amp_deg[1] - cfg.edge_cmd_amp_deg[0]))
+        t = self.episode_length_buf.float() * self.step_dt + ahead_s
+        arg = 2 * math.pi * t / self.cmd_period + self.cmd_phase
+        return amp * (cfg.edge_cmd_hold * arg.sin()).clamp(-1.0, 1.0)
+
+    def _adapt_edge_cmd(self, err_deg: torch.Tensor):
+        alive = ~self.reset_terminated
+        if alive.any():
+            self.cmd_err_ema = 0.99 * self.cmd_err_ema + 0.01 * err_deg[alive].mean().item()
+        step = 1.0 / self.cfg.edge_cmd_level_steps
+        if self.cmd_err_ema < self.cfg.edge_cmd_level_up_deg:
+            self.cmd_level = min(1.0, self.cmd_level + step)
+        elif self.cmd_err_ema > 2 * self.cfg.edge_cmd_level_up_deg:
+            self.cmd_level = max(0.0, self.cmd_level - step)
 
     def slip_target(self) -> torch.Tensor:
         target = {"sideslip": -math.pi / 2, "skid": math.radians(self.cfg.skid_slip_deg), "carve": 0.0}[self.cfg.task]
@@ -277,7 +312,8 @@ class SnowboardEnv(CarveEnv):
         return torch.stack(
             [self.board_speed(), self.v_cmd, psi.sin(), psi.cos(), beta.sin(), beta.cos(), yaw.sin(), yaw.cos(),
              y / self.cfg.fence_half_width, self.turn_side, self.turn_swing, self.since_turn.clamp(max=10.0) / 5.0,
-             self.slip_target(), fade * e_guide.sin(), fade * (1 - e_guide.cos()), torch.full_like(psi, fade)],
+             self.slip_target(), fade * e_guide.sin(), fade * (1 - e_guide.cos()), torch.full_like(psi, fade),
+             self.edge_command(), self.edge_command(0.3), self.edge_command(0.6)],
             dim=-1,
         )
 
@@ -313,6 +349,8 @@ class SnowboardEnv(CarveEnv):
         right_edge = -d * self.edge_ema  # > 0 on the edge that turns the right way
         edge = torch.where(d != 0, right_edge.clamp(min=0.0), edge_abs)  # only the right edge counts for the edge-gated terms
         wrong = torch.where(d != 0, (-right_edge).clamp(min=0.0), torch.zeros_like(edge_abs))
+        if cfg.edge_cmd:  # the command says which edge; the S state machine doesn't
+            edge, wrong = edge_abs, torch.zeros_like(edge_abs)
         self._track("edge_dir_deg", torch.where(d != 0, right_edge, torch.zeros_like(edge_abs)).rad2deg())
         clean = torch.exp(-(self.slip_angle() / math.radians(cfg.sigma_slip_deg)).square())
         tech = self._technique() if turns else {}  # also logs pelvis height and angulation
@@ -376,6 +414,14 @@ class SnowboardEnv(CarveEnv):
             self._track("err_guide_m", e_line.abs())
             self._track("err_guide_deg", e_guide.abs().rad2deg())
             self._adapt_guide(e_guide.abs().rad2deg())
+        if cfg.edge_cmd:  # dense: track the commanded edge, heel -> base -> toe
+            theta = self.snow_info["edge_angle"] if self.snow_info else zeros
+            e_cmd = theta - self.edge_command()
+            r = cfg.rew_edge_cmd * torch.exp(-(e_cmd / math.radians(cfg.edge_cmd_sigma_deg)).square()) * self.step_dt
+            reward += r
+            self._track("rew_edge_cmd", r)
+            self._track("err_edge_cmd_deg", e_cmd.abs().rad2deg())
+            self._adapt_edge_cmd(e_cmd.abs().rad2deg())
         if turns:  # a bonus per edge change, not a rate: the S needs both edges
             r = cfg.rew_edge_switch * self.edge_switch
             reward += r
@@ -509,6 +555,9 @@ class SnowboardEnv(CarveEnv):
         self.guide_k[env_ids] = 2 * math.pi / wavelength
         self.guide_y[env_ids] = wavelength * tan_a / (2 * math.pi)
         self.guide_phase[env_ids] = math.pi * (torch.rand(m, device=self.device) < 0.5).float()  # swing left or right
+        lv, (p0, p1) = self.cmd_level, self.cfg.edge_cmd_period_s
+        self.cmd_period[env_ids] = (p0 + lv * (p1 - p0)) * (0.85 + 0.3 * torch.rand(m, device=self.device))
+        self.cmd_phase[env_ids] = math.pi * (torch.rand(m, device=self.device) < 0.5).float()  # heel or toe first
         super()._reset_idx(env_ids)
         index_fill_(self.actions, env_ids, 0.0)
         index_fill_(self.prev_actions, env_ids, 0.0)
@@ -532,6 +581,7 @@ class SnowboardEnv(CarveEnv):
         log["Episode_Termination/fence"] = self.out_of_bounds[env_ids].float().mean()
         log["Episode_Snow/seconds"] = seconds.mean()
         log["Guide/level"] = torch.tensor(self.guide_fade())
+        log["EdgeCmd/level"] = torch.tensor(self.cmd_level)
         log["Guide/err_ema_deg"] = torch.tensor(self.guide_err_ema)
         self.extras["log"] = log
 
