@@ -112,6 +112,7 @@ class CarveEnvCfg(DirectRLEnvCfg):
     # joint groups left to their drives (held at the stance target, still physical) instead of the policy: fewer
     # actions to explore. Any of PASSIVE_GROUPS: "ankle" (6, boots), "neck" (3), "knee:2" (2, knee twist)
     passive_joints: tuple[str, ...] = ()
+    ankle_range_deg: dict = {}  # wider ankle limits, e.g. {"x": 45, "y": 80, "z": 55} (envs/rider.py _widen_ankles)
     stiff_boots: bool = False  # ankles held near their stance angle, 3× stiffer (envs/rider.py BOOT_RANGE_DEG)
     compliant_drives: bool = False  # per-joint-group stiffness (envs/rider.py COMPLIANT) instead of uniform, stiff
     # board model (defaults = one rigid board); see docs/BOARD_MODEL.md
@@ -174,7 +175,7 @@ def apply_rider_options(cfg: CarveEnvCfg) -> None:
         thoracic=cfg.thoracic,
         neck_stiffness_scale=cfg.neck_stiffness_scale, spine_damping_scale=cfg.spine_damping_scale,
         compliant_drives=cfg.compliant_drives, board_flex=cfg.board_flex, stiff_boots=cfg.stiff_boots,
-        knee_rotation=cfg.knee_rotation,
+        knee_rotation=cfg.knee_rotation, ankle_range_deg=dict(cfg.ankle_range_deg),
     )
     cfg.scene.board_contact.prim_path = "{ENV_REGEX_NS}/Robot/board" + (".*" if cfg.board_flex else "")
 

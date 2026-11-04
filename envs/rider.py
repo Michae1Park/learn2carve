@@ -384,6 +384,19 @@ BOOT_STIFFNESS = 3.0  # ankle drive gains × this
 ANKLES = {"right_foot": "right_ankle", "left_foot": "left_ankle"}  # USD joint prim -> DoF name prefix
 
 
+def _widen_ankles(stage, root: str, cfg: RiderSpawnCfg) -> None:
+    """Ankle limits ± cfg.ankle_range_deg[axis] about 0 (stock: roll ±30, flex ±55, twist ±40). The posi-posi squat
+    stance sits at the stock limits (right flex at -55, left roll 1° short of -30), which locks the board's roll."""
+    from pxr import UsdPhysics
+
+    for joint in ANKLES:
+        prim = stage.GetPrimAtPath(f"{root}/joints/{joint}")
+        for axis, half in cfg.ankle_range_deg.items():
+            limit = UsdPhysics.LimitAPI(prim, f"rot{axis.upper()}")
+            limit.GetLowAttr().Set(-half)
+            limit.GetHighAttr().Set(half)
+
+
 def _fit_boots(stage, root: str, cfg: RiderSpawnCfg) -> None:
     from pxr import UsdPhysics
 
@@ -453,6 +466,8 @@ def spawn_rider(prim_path: str, cfg: RiderSpawnCfg, translation=None, orientatio
     if cfg.thoracic:
         _split_torso(stage, prim_path, cfg)
     _tune_drives(stage, prim_path, cfg)
+    if cfg.ankle_range_deg:
+        _widen_ankles(stage, prim_path, cfg)
     if cfg.stiff_boots:
         _fit_boots(stage, prim_path, cfg)
     _author_board(stage, prim_path, cfg)
@@ -482,6 +497,7 @@ class RiderSpawnCfg(UsdFileCfg):
     knee_rotation: bool = False  # knees get a ±20° axial twist (2 DoF each)
     stiff_boots: bool = False  # snowboard boots: ankles held near their stance angle (BOOT_RANGE_DEG), 3× stiffer
     boot_center_deg: dict = {}  # {ankle joint: stance angle [deg]}; filled by rider_cfg from the stance
+    ankle_range_deg: dict = {}  # {"x" | "y" | "z": half range [deg]}: wider ankle limits about 0; {} = stock
     neck_stiffness_scale: float = 1.0  # neck PD gains × this
     spine_damping_scale: float = 1.0  # abdomen + thorax damping × this (anti-jerk)
 
