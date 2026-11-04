@@ -34,6 +34,7 @@ scripts/py playground/snowboard/train.py --task carve --set slope_deg=10
 scripts/py playground/snowboard/play.py logs/playground/snowboard/<run>                        # prints + trail.png
 scripts/py playground/snowboard/play.py logs/playground/snowboard/<run> --livestream 2 --seconds 120
 scripts/py playground/snowboard/play.py --no_policy --task sideslip                            # stance only
+scripts/py playground/snowboard/play.py logs/playground/snowboard/<run> --record <dir>         # <dir>/front.gif, top.gif
 ```
 
 Play repeats **short evaluation runs**: each ends two full S's down the piste (`--run_length`, default
@@ -47,6 +48,10 @@ track is drawn on the snow behind the rider (blue strips; width = snow the board
 (0.6 m) just past the end of the run, looking back up at the start through a 35 mm lens (`--focal`), so the
 rider carves toward you against the sky. Then it's yours: orbit, pan, zoom. `--cam_x <m>` moves it along the
 run; `--follow` tracks the rider instead.
+
+**Recording:** `--record <dir>` films the first run with two follow cameras, headless: `front` (5 m off the rider's
+chest, smoothed through turns) and `top` (16 m above, track trailing up the frame), saved as `front.gif` / `top.gif`.
+The README demos are these, downscaled with ffmpeg to 360 px / 12 fps.
 
 **The mountain:** the piste runs down a valley. Its sides rise from gentle forested slopes into rocky ridges, and
 a crest closes it above the start, low enough that the bottom camera sees sky above it. An orange safety net on

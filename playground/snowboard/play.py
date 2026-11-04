@@ -39,10 +39,14 @@ parser.add_argument("--cam_x", type=float, default=None,
 parser.add_argument("--focal", type=float, default=35.0, help="camera focal length [mm] (Kit's default is ~18)")
 parser.add_argument("--num_envs", type=int, default=1)
 parser.add_argument("--follow", action="store_true", help="camera tracks the rider (default: free camera)")
+parser.add_argument("--record", type=Path, default=None, metavar="DIR",
+                    help="film one run with two follow cameras (front, top) -> DIR/front.gif, DIR/top.gif; needs --enable_cameras")
 parser.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE", help="env cfg overrides on top of the run's")
 add_suppress_arg(parser)
 add_launcher_args(parser)
 args = parser.parse_args()
+if args.record:
+    args.enable_cameras = True  # the launcher only turns RTX cameras on for sensors it finds in a cfg
 if not args.no_policy and args.run is None:
     parser.error("give a run directory, or --no_policy")
 
@@ -100,7 +104,10 @@ def main():
         from playground.snowboard.trail import SnowTrail
 
         overrides, wavelength, run_length = play_overrides(run["overrides"], SnowboardEnvCfg(task=task))
-        raw_env = make_env(SnowboardEnv, SnowboardEnvCfg(task=task), overrides, args.num_envs, sim_cfg,
+        env_cfg = SnowboardEnvCfg(task=task)
+        if args.record:
+            Recorder.add_cameras(env_cfg)
+        raw_env = make_env(SnowboardEnv, env_cfg, overrides, args.num_envs, sim_cfg,
                            args.suppress_warnings)
         if args.no_policy:
             env, agent = raw_env, None
@@ -114,7 +121,10 @@ def main():
         print(f"\n[play] task={task}  {'no policy' if args.no_policy else args.run.name}  run {run_length:.0f} m, "
               f"turn length {wavelength:.0f} m, fence ±{raw_env.cfg.fence_half_width:.0f} m")
         print(f"[play] {RunStats.HEADER}")
-        longest_secs, longest_marks = ride(env, raw_env, agent, trail)
+        recorder = Recorder(raw_env, trail) if args.record else None
+        longest_secs, longest_marks = ride(env, raw_env, agent, trail, recorder)
+        if recorder:
+            recorder.save(args.record)
 
         trail.marks = longest_marks
         swing, phase = raw_env.swing[0].item(), raw_env.phase[0].item()
@@ -154,7 +164,7 @@ def play_overrides(run_overrides: dict, defaults) -> tuple[dict, float, float]:
     return overrides, wavelength, run_length
 
 
-def ride(env, raw_env, agent, trail) -> tuple[float, list]:
+def ride(env, raw_env, agent, trail, recorder=None) -> tuple[float, list]:
     """Play for --seconds, one printed line per run. Returns the longest run's (seconds, trail marks)."""
     steps = int(args.seconds / raw_env.step_dt)
     obs, _ = env.reset()
@@ -174,6 +184,8 @@ def ride(env, raw_env, agent, trail) -> tuple[float, list]:
         if not done:  # on a done step the env has already reset to the start
             stats.add(raw_env)
             trail.add(raw_env.body_pos(raw_env.board_id)[0], raw_env.slip_angle()[0].item())
+            if recorder:
+                recorder.capture()
         if done or t == steps - 1:
             runs += 1
             end = "fence" if raw_env.out_of_bounds[0] else "fell" if terminated else "done" if truncated else "-"
@@ -184,7 +196,69 @@ def ride(env, raw_env, agent, trail) -> tuple[float, list]:
             trail.marks.clear()
             trail.reset()
             stats = RunStats()
+            if recorder:
+                break
     return longest
+
+
+class Recorder:
+    """Two cameras that follow env 0's rider: "front" faces the rider's chest (frontside) from 5 m, "top" looks down
+    on the board from 16 m up so the track behind it shows. Frames are kept on the CPU, written as GIFs at the end."""
+
+    SIZE = (480, 320)  # w, h
+
+    VIEWS = {"front": 30.0, "top": 18.0}  # name: focal length [mm]
+
+    @classmethod
+    def add_cameras(cls, env_cfg):
+        """Cameras go in the scene cfg so they are built with the env (built later, the rider never renders)."""
+        from isaaclab.sensors import CameraCfg
+
+        for name, focal in cls.VIEWS.items():
+            setattr(env_cfg.scene, f"record_{name}", CameraCfg(
+                prim_path=f"{{ENV_REGEX_NS}}/Record_{name}", width=cls.SIZE[0], height=cls.SIZE[1],
+                data_types=["rgb"], update_period=0.0,
+                spawn=sim_utils.PinholeCameraCfg(focal_length=focal, clipping_range=(0.1, 2000.0))))
+
+    def __init__(self, env, trail):
+        self.env, self.trail = env, trail
+        self.frames = {name: [] for name in self.VIEWS}
+        self.cams = {name: env.scene[f"record_{name}"] for name in self.VIEWS}
+        self.facing = None
+
+    def capture(self):
+        env = self.env
+        pelvis = env.body_pos(env.pelvis_id)[0]
+        # chest direction: pelvis local +x, flattened onto the snow and smoothed so turns don't shake the camera
+        from isaaclab.utils.math import quat_apply
+
+        fwd = quat_apply(env.body_quat(env.pelvis_id)[0], torch.tensor([1.0, 0.0, 0.0], device=env.device))
+        fwd[2] = 0.0
+        fwd = fwd / fwd.norm().clamp(min=1e-6)
+        self.facing = fwd if self.facing is None else 0.92 * self.facing + 0.08 * fwd
+        f = self.facing / self.facing.norm().clamp(min=1e-6)
+        up = torch.tensor([0.0, 0.0, 1.0], device=env.device)
+        down = torch.tensor([1.0, 0.0, 0.0], device=env.device)  # downhill in the slope frame
+        views = {
+            "front": (pelvis + 5.0 * f + 0.6 * up + 1.0 * down, pelvis),
+            # eye a little downhill of its target: image up = uphill, so the track trails up the frame behind the rider
+            "top": (pelvis + 2.0 * down + 16.0 * up, pelvis - 4.0 * down - 0.8 * up),
+        }
+        for name, (eye, target) in views.items():
+            cam = self.cams[name]
+            cam.set_world_poses_from_view(env.to_world(eye)[None], env.to_world(target)[None])
+        env.sim.render()
+        for name, cam in self.cams.items():
+            self.frames[name].append(cam.data.output["rgb"][0, ..., :3].cpu().numpy())
+
+    def save(self, out_dir: Path):
+        import imageio.v2 as imageio
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for name, frames in self.frames.items():
+            path = out_dir / f"{name}.gif"
+            imageio.mimsave(path, frames[::2], duration=2 * self.env.step_dt * 1000, loop=0)  # 15 fps, real time
+            print(f"[play] {len(frames[::2])} frames -> {path}")
 
 
 def free_view_cfg(slope_deg: float | None, cam_x: float):
