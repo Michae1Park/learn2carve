@@ -74,7 +74,7 @@ def _fix_hinge_drives(stage, root: str) -> None:
 
 def _board_visuals(stage, body_for_x, length: float, width: float, thickness: float) -> None:
     """What the board looks like (no collision, no mass): a dark navy deck with round nose and tail, cyan edge stripes,
-    a white centre line, chevrons toward each end and a ring on each tip. body_for_x(x) names the body a part at board
+    a white centre line, chevrons toward each end and a ring on each tip; a simple cyan stripe and white tips on the base. body_for_x(x) names the body a part at board
     x rides on (one rigid board, or the nose / tail halves with board_flex)."""
     from pxr import Gf, UsdGeom
 
@@ -112,6 +112,10 @@ def _board_visuals(stage, body_for_x, length: float, width: float, thickness: fl
     for sign in (1, -1):  # cyan stripes along both edges, white line down the middle
         box(0.0, sign * (r - 0.018), z, body_len, 0.012, h, BOARD_STRIPE)
     box(0.0, 0.0, z, body_len, 0.008, h, BOARD_WHITE)
+    zb = -top - 0.0006  # the base: one wide cyan stripe and a white disc on each tip (seen when the board is on edge)
+    box(0.0, 0.0, zb, body_len, 0.07, h, BOARD_STRIPE)
+    for sign in (1, -1):
+        disc(sign * body_len / 2, 0.0, zb, r - 0.03, h, BOARD_WHITE)
     for sign in (1, -1):
         tip = sign * body_len / 2
         disc(tip, 0.0, z, r - 0.02, h, BOARD_STRIPE)  # ring on each tip: cyan disc, navy disc, white dot
