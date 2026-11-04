@@ -98,6 +98,8 @@ class SnowboardEnvCfg(CarveEnvCfg):
     # the snow normal, for matching it. (The torso line itself leans ~30° at rest: the posi-posi bow shows in the roll
     # plane. The COM is ~0 at rest, balanced, so it needs no offset.)
     rew_pose_ref = 0.0
+    rew_tilt = 0.0  # per s, × clip((torso tilt - tilt_free_deg) / 20°): a toe carve bowed past ~65° cannot get back to the heel
+    tilt_free_deg = 50.0
     # stage 1 (carve controller): start every episode already in a balanced carve, board on edge θ with
     # sin θ = v² / (g cos(slope) · R_sc), heel or toe, and command that edge for the whole episode (no transitions)
     carve_start: bool = False
@@ -458,6 +460,13 @@ class SnowboardEnv(CarveEnv):
                 self._track("rew_edge_side", r)
             self._track("err_edge_cmd_deg", e_cmd.abs().rad2deg())
             self._adapt_edge_cmd(e_cmd.abs().rad2deg())
+            if cfg.rew_tilt:
+                t_up = quat_apply(self.body_quat(self.torso_id), self.up.expand(self.num_envs, 3))
+                tilt = torch.acos((t_up * self.up).sum(-1).clamp(-1.0, 1.0))
+                excess = ((tilt - math.radians(cfg.tilt_free_deg)) / math.radians(20.0)).clamp(0.0, 1.0)
+                r = cfg.rew_tilt * excess * self.step_dt
+                reward += r
+                self._track("rew_tilt", r)
             if cfg.rew_pose_ref:
                 legs, torso = self.roll_leans()
                 legs_ref = cfg.pose_ref_legs * self.edge_command()
