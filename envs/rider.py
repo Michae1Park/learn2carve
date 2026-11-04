@@ -33,7 +33,9 @@ OUTFIT = {
     "pants": ((0.03, 0.03, 0.035), ("right_thigh", "left_thigh", "right_shin", "left_shin")),
     "dark": ((0.03, 0.03, 0.03), ("head", "right_hand", "left_hand", "right_foot", "left_foot")),  # helmet, gloves, boots
 }
-BOARD_COLOR = (0.05, 0.30, 0.95)
+BOARD_COLOR = (0.015, 0.03, 0.14)  # dark navy
+BOARD_STRIPE = (0.0, 0.62, 0.85)  # cyan graphics on the top deck
+BOARD_WHITE = (0.9, 0.93, 0.97)
 
 # Sole centre of the humanoid's foot box, in the foot body frame (box centre (0.045, 0, -0.0225), half-height 0.0275)
 FOOT_SOLE = (0.045, 0.0, -0.05)
@@ -70,6 +72,58 @@ def _fix_hinge_drives(stage, root: str) -> None:
             getattr(dst, f"Create{attr}Attr")(getattr(src, f"Get{attr}Attr")().Get())
 
 
+def _board_visuals(stage, body_for_x, length: float, width: float, thickness: float) -> None:
+    """What the board looks like (no collision, no mass): a dark navy deck with round nose and tail, cyan edge stripes,
+    a white centre line, chevrons toward each end and a ring on each tip. body_for_x(x) names the body a part at board
+    x rides on (one rigid board, or the nose / tail halves with board_flex)."""
+    from pxr import Gf, UsdGeom
+
+    n = [0]
+
+    def prim_path(x: float) -> str:
+        n[0] += 1
+        return f"{body_for_x(x)}/vis_{n[0]}"
+
+    def box(x, y, z, sx, sy, sz, color, yaw_deg=0.0):
+        geom = UsdGeom.Cube.Define(stage, prim_path(x))
+        geom.CreateSizeAttr(1.0)
+        geom.AddTranslateOp().Set(Gf.Vec3d(x, y, z))
+        geom.AddRotateZOp().Set(yaw_deg)
+        geom.AddScaleOp().Set(Gf.Vec3f(sx, sy, sz))
+        geom.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+
+    def disc(x, y, z, radius, height, color):
+        geom = UsdGeom.Cylinder.Define(stage, prim_path(x))
+        geom.CreateAxisAttr("Z")
+        geom.CreateRadiusAttr(radius)
+        geom.CreateHeightAttr(height)
+        geom.AddTranslateOp().Set(Gf.Vec3d(x, y, z))
+        geom.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+
+    r = width / 2
+    body_len = length - width  # the straight part; a half-disc of radius r closes each end
+    top = thickness / 2
+    # deck: a box between two round tips, so the outline is a stadium
+    box(0.0, 0.0, 0.0, body_len, width, thickness, BOARD_COLOR)
+    for sign in (1, -1):
+        disc(sign * body_len / 2, 0.0, 0.0, r, thickness, BOARD_COLOR)
+    # graphics, a hair above the deck
+    z, h = top + 0.0006, 0.0012
+    for sign in (1, -1):  # cyan stripes along both edges, white line down the middle
+        box(0.0, sign * (r - 0.018), z, body_len, 0.012, h, BOARD_STRIPE)
+    box(0.0, 0.0, z, body_len, 0.008, h, BOARD_WHITE)
+    for sign in (1, -1):
+        tip = sign * body_len / 2
+        disc(tip, 0.0, z, r - 0.02, h, BOARD_STRIPE)  # ring on each tip: cyan disc, navy disc, white dot
+        disc(tip, 0.0, z + 0.0004, r - 0.036, h, BOARD_COLOR)
+        disc(tip, 0.0, z + 0.0008, 0.018, h, BOARD_WHITE)
+        for k, dx in enumerate((0.20, 0.30, 0.40)):  # chevrons pointing outward, fading from cyan to white
+            x = sign * (body_len / 2 - dx - 0.05)
+            color = BOARD_STRIPE if k < 2 else BOARD_WHITE
+            for side in (1, -1):
+                box(x - sign * 0.012, side * 0.045, z, 0.105, 0.012, h, color, yaw_deg=sign * side * 32.0)
+
+
 def _author_board(stage, root: str, cfg: RiderSpawnCfg) -> None:
     from pxr import Gf, Sdf, UsdGeom, UsdPhysics
 
@@ -87,15 +141,21 @@ def _author_board(stage, root: str, cfg: RiderSpawnCfg) -> None:
         geom.AddScaleOp().Set(Gf.Vec3f(*size))
         geom.CreateDisplayColorAttr([Gf.Vec3f(*BOARD_COLOR)])
         UsdPhysics.CollisionAPI.Apply(geom.GetPrim())
+        geom.MakeInvisible()  # the box only collides; _board_visuals draws the board the eye sees (round nose and tail)
+
+    def visuals(body_for_x) -> None:
+        _board_visuals(stage, body_for_x, length, width, thickness)
 
     if not cfg.board_flex:
         board_body(board_path, cfg.board_mass, cfg.board_size, 0.0)
+        visuals(lambda x: board_path)
     else:
         # two halves, nose (+x) and tail (-x), each a box of half the length; the joint between them at the centre
         half = (length / 2, width, thickness)
         board_body(board_path, cfg.board_mass / 2, half, +length / 4)
         board_body(tail_path, cfg.board_mass / 2, half, -length / 4)
         _author_board_spring(stage, root, board_path, tail_path, cfg)
+        visuals(lambda x: board_path if x >= 0 else tail_path)
 
     def fixed_joint(name: str, body0: str | None, body1: str, pos0, rot0, pos1, rot1, in_tree: bool) -> None:
         joint = UsdPhysics.FixedJoint.Define(stage, f"{root}/joints/{name}")
