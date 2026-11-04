@@ -89,7 +89,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_edge_cmd = 6.0  # exp(-((θ - θ*) / σ)²)
     edge_cmd_sigma_deg = 12.0
     edge_cmd_amp_deg = (20.0, 50.0)  # level 0 -> 1
-    edge_cmd_period_s = (4.5, 2.6)  # one full S (two edges), level 0 -> 1; ±15 % per episode
+    edge_cmd_period_s = (4.6, 4.0)  # one full S (two edges, a turn every ~2 s), level 0 -> 1; ±15 % per episode
     edge_cmd_hold = 1.8  # trapezoid sharpness: clamp(hold · sin, -1, 1)
     edge_cmd_level_up_deg = 12.0  # mean tracking error below this raises the level, above 2× lowers it
     edge_cmd_level_steps = 2000  # steps to go from level 0 to 1 at best

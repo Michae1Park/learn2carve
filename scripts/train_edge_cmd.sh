@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Edge command (from scratch): the env commands a signed edge angle that rolls heel -> base -> toe on a timer; the
-# policy is rewarded for tracking it (curriculum: ±20° / 4.5 s up to ±50° / 2.6 s). The S-gate rewards are off.
+# policy is rewarded for tracking it (curriculum: ±20° / 4.6 s up to ±50° / 4.0 s, a turn every ~2 s). The S-gate rewards are off.
 # Speed: on the sidecut arc sin(edge) = v² / (g · 7.6 m), so 5–7 m/s only balances 20–41°; 7.5–9 m/s balances 47–80°.
 # Extra args go to train.py.
 cd "$(dirname "$0")/.." && exec scripts/train_best.sh speed_cap=10.0 "speed_cmd=[7.5,9]" stance_tag=squat3 \
