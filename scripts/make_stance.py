@@ -23,6 +23,11 @@ parser.add_argument("--open_deg", type=float, default=20.0, help="pelvis rotatio
 parser.add_argument("--seconds", type=float, default=6.0)
 parser.add_argument("--angles", type=float, nargs=2, default=None, metavar=("FRONT", "BACK"),
                     help="binding angles [deg]; default config.yaml. Others write envs/assets/stance_<front>_<back>.yaml")
+parser.add_argument("--knee", type=float, default=0.6, help="initial guess: knee flexion [rad]")
+parser.add_argument("--hip_y", type=float, default=-0.35, help="initial guess: hip pitch [rad], negative = flexed")
+parser.add_argument("--ankle_y", type=float, default=-0.25, help="initial guess: ankle pitch [rad]")
+parser.add_argument("--guess_from", type=Path, default=None,
+                    help="start the settle from another stance file's joint angles (lower the hip step by step)")
 parser.add_argument("--tag", default="", help="write a stance variant, e.g. squat: stance[_<front>_<back>]_<tag>.yaml")
 add_launcher_args(parser)
 args = parser.parse_args()
@@ -37,7 +42,12 @@ import isaaclab.sim as sim_utils
 from envs import config
 
 # initial guess: bent knees, flexed hips, feet turned toward the nose
-GUESS = {".*_knee": 0.6, ".*_hip_y": -0.35, ".*_ankle_y": -0.25, "left_hip_z": 0.38, "right_hip_z": 0.12}
+GUESS = {".*_knee": args.knee, ".*_hip_y": args.hip_y, ".*_ankle_y": args.ankle_y, "left_hip_z": 0.38,
+         "right_hip_z": 0.12}
+if args.guess_from is not None:
+    import yaml as _yaml
+
+    GUESS = _yaml.safe_load(args.guess_from.read_text())["joint_pos"]
 
 
 def main():
