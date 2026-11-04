@@ -78,7 +78,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     fall_height = 0.20  # pelvis above the snow [m]: a deep carve puts the hips within ~0.3 m of it (was 0.45)
     rew_carve = 2.0
     edge_target_deg = 20.0  # full carve credit at or above this edge angle. Carve: 40 (see __post_init__)
-    rew_low = 1.0  # turn tasks, always: pelvis 0.30–0.45 m above the board; never stand up (0 at 0.55 m), never lie
+    rew_low = 1.0  # turn tasks, always: pelvis 0.30–0.45 m above the board, ramping up from the 0.80 m stance; never lie
                    # down (0 at 0.15 m: an ungated version was gamed by leaning back)
     rew_slip = 2.0  # skid / side slip only (the carve term covers slip for carving): exp(-(slip error / σ_slip)²)
     rew_heading = 2.0  # side slip only: exp(-(heading / σ)²), straight down the fall line
@@ -305,10 +305,10 @@ class SnowboardEnv(CarveEnv):
         return self.body_pos(self.pelvis_id)[:, 2] - self.body_pos(self.board_id)[:, 2]
 
     def low(self) -> torch.Tensor:
-        """0..1: full with the pelvis 0.30–0.45 m above the board (hips near the snow, as in a deep carve), 0 at
-        0.55 m and above (upright) and at 0.15 m (lying)."""
+        """0..1: a ramp from 0 at the 0.80 m stance to full at 0.45 m, full down to 0.30 m (hips near the snow, as in
+        a deep carve), then 0 at 0.15 m (lying). The ramp starts at the stance so a standing rider feels a gradient."""
         h = self.pelvis_height()
-        return ((0.55 - h) / 0.10).clamp(0.0, 1.0) * ((h - 0.15) / 0.15).clamp(0.0, 1.0)
+        return ((0.80 - h) / 0.35).clamp(0.0, 1.0) * ((h - 0.15) / 0.15).clamp(0.0, 1.0)
 
     def turning(self) -> torch.Tensor:
         """0..1: how hard the board is turning, from its yaw rate about the snow normal (full at 0.5 rad/s)."""

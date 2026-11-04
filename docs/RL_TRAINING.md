@@ -80,7 +80,7 @@ $$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{turn}}\,\mathbb{1}[\text{turn}] \
 | **Speed** | $\exp\!\big(-((\lVert v\rVert - v^*)/5)^2\big)$, $v^* \sim U(8, 11)$ m/s | 2.0 |
 | **Speed cap** | $\operatorname{clip}\big((\lVert v\rVert - 12)/2,\ 0,\ 1\big)$: forces turns finished across the hill | −3.0 |
 | **Carve** | $\underbrace{\operatorname{clip}(\lvert\theta\rvert/40°)}_{\text{edged}} \cdot \underbrace{\operatorname{clip}(\lvert\dot\psi_{\text{board}}\rvert/0.5\text{ rad/s})}_{\text{turning}} \cdot \underbrace{e^{-(\beta/15°)^2}}_{\text{clean}} \cdot (0.5 + 0.5\,\text{low})$: full at 40° and up | 2.0 |
-| **Low** | Pelvis 0.30–0.45 m above the board, always: never stand up (0 at 0.55 m), never lie down (0 at 0.15 m) | 1.0 |
+| **Low** | Pelvis above the board, always: ramps from 0 at the 0.80 m stance to full at 0.45 m (full to 0.30 m), never lie down (0 at 0.15 m) | 1.0 |
 | **Turn** | At each fall-line crossing: $\operatorname{clip}\big((\text{swing} - 30°)/(85° - 30°),\ 0,\ 1\big)$: deeper turns pay more, full at 85° | 1.0 |
 | **Fall** | Once, a fall or a fence | −10 |
 | Guide | $e^{-((\psi - \psi_{\text{guide}})/30°)^2}$ × adaptive fade | 4.0 → 0 |
