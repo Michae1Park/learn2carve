@@ -100,6 +100,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_pose_ref = 0.0
     rew_tilt = 0.0  # per s, × clip((torso tilt - tilt_free_deg) / 20°): a toe carve bowed past ~65° cannot get back to the heel
     tilt_free_deg = 50.0
+    rew_rise = 0.0  # per s, while the command crosses flat (|cmd| < 8°): × clip((pelvis height - 0.35 m) / 0.2 m), rise to change edges
     # stage 1 (carve controller): start every episode already in a balanced carve, board on edge θ with
     # sin θ = v² / (g cos(slope) · R_sc), heel or toe, and command that edge for the whole episode (no transitions)
     carve_start: bool = False
@@ -467,6 +468,12 @@ class SnowboardEnv(CarveEnv):
                 r = cfg.rew_tilt * excess * self.step_dt
                 reward += r
                 self._track("rew_tilt", r)
+            if cfg.rew_rise:
+                near_flat = (self.edge_command().abs() < math.radians(8.0)).float()
+                tall = ((self.pelvis_height() - 0.35) / 0.2).clamp(0.0, 1.0)
+                r = cfg.rew_rise * near_flat * tall * self.step_dt
+                reward += r
+                self._track("rew_rise", r)
             if cfg.rew_pose_ref:
                 legs, torso = self.roll_leans()
                 legs_ref = cfg.pose_ref_legs * self.edge_command()
