@@ -4,6 +4,9 @@ The rider is Isaac Lab's **28-DoF AMP humanoid** (`humanoid_28.usd`, capsule bod
 bound to the board as one articulation (`envs/rider.py`, `envs/carve_env.py`). PhysX simulates it; the policy only
 sets joint targets. Knobs: `config.yaml` → `rider`, plus the `CarveEnvCfg` flags of §6, which the demo run sets from its training scripts. SI units; angles in ° unless marked rad.
 
+**Changes from stock** (details in §1, §6): scaled to a 65 kg, 1.65 m body with a heavier pelvis, a passive knee-twist
+joint, a wider torso-twist range, boot-stiff ankles and softer arms.
+
 ![Humanoid kinematic tree: pelvis root, abdomen, torso, neck, head, arms and legs, both feet bound to the board](rider/humanoid_tree.svg)
 
 ## 1. Bodies
@@ -66,7 +69,7 @@ The loop needs a converged solver: **32 position / 4 velocity iterations** at 12
 
 The default pose $q^{\text{stance}}$ is *found by simulation*, not hand-set: the pelvis and board are welded to the
 world at the target poses, the binding constraints pull the feet onto the board, and the drives settle. The result
-closes both loops exactly and is saved to `envs/assets/stance_<front>_<back>[_<tag>].yaml`.
+closes both loops exactly and is saved to `envs/assets/stances/stance_<front>_<back>[_<tag>].yaml`.
 
 | Setting | Value |
 |---|---|
@@ -86,7 +89,7 @@ Stance files are named by binding angles, `stance_<front>_<back>[_<tag>].yaml`. 
 The demo policy has **30 actions**: 2 synergy actions + 28 joint residuals (26 joints + 2 knee flexions; the knee
 twist and the boots' stance are left to their drives). Targets add up as
 
-$$q^* = \operatorname{clip}\!\left(q^{\text{stance}} + 0.3 \cdot 0.5 \cdot \tfrac{1}{2}(q^{\max} - q^{\min}) \cdot a_j + \textstyle\sum_k s_k\,\rho_k + \text{toe}(s_0),\ q^{\min},\ q^{\max}\right)$$
+$$q^* = \mathrm{clip}\!\left(q^{\text{stance}} + 0.3 \cdot 0.5 \cdot \tfrac{1}{2}(q^{\max} - q^{\min}) \cdot a_j + \textstyle\sum_k s_k\,\rho_k + \text{toe}(s_0),\ q^{\min},\ q^{\max}\right)$$
 
 | Term | Value |
 |---|---|
@@ -110,33 +113,12 @@ the **bold** rows; the rest are available but off.
 | **`binding_angles_deg=[54,45]`** | Forward stance, the config default; hips face more toward the nose |
 | **`pelvis_mass_frac=0.2`** | **Heavy root**: the pelvis carries 20% of the mass (stock 12.6%), the rest scale down to keep 65 kg |
 | **`knee_rotation=true`**, **`passive_joints=[knee:2]`** | **Knee twist.** Each knee becomes 2 DoF: `knee:0` flexion (0–160°) + `knee:2` axial twist about the shin (±20°, 0.3× the flexion stiffness). The twist is **passive**: held by its spring and damper, observed, not in the action space |
-| **`ankle_range_deg={x:45,y:80,z:55}`** | Ankle limits widened from ±30 / ±55 / ±40° (the squat stance sat at the stock limits) |
-| **`stiff_boots=true`**, **`boot_range_deg={y:[-5,15], x:[-5,5], z:[-5,5]}`** | **Snowboard boots.** Ankles held within roll ±5°, twist ±5° and flex −5…+15° of their stance angle, drives 3× stiffer: the edge has to come from the hips and knees. The flex range is asymmetric so the shin can lean into the toe side |
+| **`stiff_boots=true`**, **`boot_range_deg={y:[-5,15], x:[-5,5], z:[-5,5]}`**, **`ankle_range_deg={x:45,y:80,z:55}`** | **Snowboard boots.** Ankles held within roll ±5°, twist ±5° and flex −5…+15° of their stance angle, drives 3× stiffer: the edge has to come from the hips and knees. The flex range is asymmetric so the shin can lean into the toe side. The ankle limits are first widened from ±30 / ±55 / ±40° so the squat stance fits inside them |
 | **`torso_twist_deg=90`** | `abdomen_z` range ±90° (stock ±50°; the stance already twists +47°, which left no room to turn the chest past the nose for a heel turn) |
 | **`arm_stiffness_scale=0.3`**, **`arm_action_scale=0.5`** | Softer arms (shoulder/elbow gains ×0.3) with a larger action range, so they can reach for the edge |
 | **`synergy=true`**, `synergy_toe_rad`, `synergy_smooth=0.35`, `joint_smooth=0.35` | Edge and lean actions (§5) |
-| `thoracic=true` | **Second spine joint.** The torso splits into a lumbar segment (4.4 kg) and a chest (12.6 kg) joined by a 2-DoF thoracic joint, `thorax:0` roll (±40°) and `thorax:1` pitch (−40…60°). Neck and shoulders move to the chest. **30 DoF** |
-| `compliant_drives=true` | **Per-group stiffness** instead of one uniform, very stiff drive (damping follows, keeping each joint's damping ratio) |
-| `neck_stiffness_scale=0.5` | Softer neck: the head moves instead of being held rigid |
-| `spine_damping_scale=2` | Extra damping on abdomen + thorax: no torso jerks |
-| `physics_hz=240`, `solver_iterations=[16,4]` | Physics at 240 Hz (decimation 8), fewer solver iterations |
-| `leg_action_scale=0.5` | Hips and knees get ±50% of their half-range per unit action (others ±25%) |
-| `board_flex=true` | Two-half board, see [board model §4](BOARD_MODEL.md#4-two-half-board-torsion-camber-flex-progressive-sidecut) |
 
-**Spine:**
-
-```
-pelvis ─abdomen (3)─ lumbar ─thorax (2)─ chest ─┬─ neck (3) ─ head
-                                                └─ shoulders (3) ─ arms
-```
-
-**Compliant drives** (stiffness × scale, on top of the mass scaling):
-
-| Group | Hip | Knee | Ankle | Abdomen | Thorax | Shoulder | Elbow | Neck |
-|---|---|---|---|---|---|---|---|---|
-| Scale | 1.0 | 1.0 | 0.7 | 0.35 | 0.35 | 0.3 | 0.3 | 0.4 (× 0.5 neck scale) |
-
-Legs carry the body and stay stiff; the spine, arms and neck give, as a human's do.
+**Also available, off in the demo:** `thoracic` (second spine joint, 30 DoF), `compliant_drives` (per-group stiffness), `neck_stiffness_scale`, `spine_damping_scale`, `physics_hz=240` with `solver_iterations=[16,4]`, `leg_action_scale`, and `board_flex` (two-half board, see [board model §4](BOARD_MODEL.md#4-two-half-board-torsion-camber-flex-progressive-sidecut)).
 
 ### Checks (`scripts/rider_check.py`: stance held 3 s, zero action)
 
@@ -145,10 +127,7 @@ Measured on the earlier rider (baseline stance, before the rebuild); not re-run 
 | Model | Worst sag | Falls | Step time |
 |---|---|---|---|
 | Baseline: 120 Hz, 32 / 4 | 0.014 rad | 0% | 1.0× |
-| 240 Hz, 8 / 4 | 0.055 | 0% | 1.1× |
-| 240 Hz, 12 / 4 | 0.023 | 0% | 1.2× |
 | **240 Hz, 16 / 4** | **0.013** | 0% | — |
-| 120 Hz, 12 / 4 | 0.044 | **100%** | 0.6× |
 | **Full new rider + two-half board**, 240 Hz, 16 / 4 | **0.017** (board bend) | 0% | 2.0× (training throughput) |
 
 - **Velocity iterations don't help** (12 / 4 and 12 / 6 are identical).
