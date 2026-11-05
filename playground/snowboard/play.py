@@ -214,8 +214,8 @@ def ride(env, raw_env, agent, trail, recorder=None) -> tuple[float, list, list]:
 
 
 class Recorder:
-    """Two cameras that follow env 0's rider: "front" faces the rider's chest (frontside) from 5 m, "top" looks down
-    on the board from 16 m up so the track behind it shows. Frames are kept on the CPU, written as GIFs at the end."""
+    """Two cameras that follow env 0's rider: "front" faces the rider's chest (frontside) from 7 m, "top" looks down
+    on the board from 48 m up so a full S of the track behind it shows. Frames are kept on the CPU, written as GIFs at the end."""
 
     SIZE = (900, 600)  # w, h
 
@@ -252,9 +252,9 @@ class Recorder:
         up = torch.tensor([0.0, 0.0, 1.0], device=env.device)
         down = torch.tensor([1.0, 0.0, 0.0], device=env.device)  # downhill in the slope frame
         views = {
-            "front": (pelvis + 5.0 * f + 0.6 * up + 1.0 * down, pelvis),
+            "front": (pelvis + 7.0 * f + 1.0 * up + 1.5 * down, pelvis),
             # eye a little downhill of its target: image up = uphill, so the track trails up the frame behind the rider
-            "top": (pelvis + 2.0 * down + 16.0 * up, pelvis - 4.0 * down - 0.8 * up),
+            "top": (pelvis + 6.0 * down + 48.0 * up, pelvis - 14.0 * down - 0.8 * up),
         }
         for name, (eye, target) in views.items():
             cam = self.cams[name]

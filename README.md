@@ -21,9 +21,9 @@
 
 ## Overview
 
-Learn2Carve teaches a humanoid to ride a snowboard down a slope and lay it over on its edge, drawing a thin S line
-instead of skidding or sliding sideways. The snow, the board and their interaction are modelled from scratch, and
-the rider is trained with PPO in stages.
+Learn2Carve teaches a humanoid to ride a snowboard down a slope and lay it over on its edge, drawing a thin S line.
+The snow, the board and their interaction are modelled from scratch. The rider is Isaac Lab's AMP humanoid, lightly
+modified for snowboarding, and is trained with PPO in stages.
 
 <div align="center">
 
@@ -31,8 +31,7 @@ the rider is trained with PPO in stages.
 
 <img src="docs/demo/carve_top.gif" width="600" alt="Carving, top view: a thin S line">
 
-<!-- TODO: screenshot of Isaac Sim training with many humanoids densely placed -->
-<img src="docs/demo/training.png" width="820" alt="Isaac Sim training: many riders in parallel">
+<img src="docs/demo/training.gif" width="820" alt="Isaac Sim: 64 riders in parallel, as in training">
 
 </div>
 
