@@ -1,6 +1,6 @@
 # Stage 3, centred S turns
 Recipe: `scripts/train_stage3_full_s.sh` (heading-switched edge command, the switch heading shifted 2°/m toward the
-piste centre, 4 s backstop), warm-started from `saved/stage3_heading_s`.
+piste centre, 4 s backstop), warm-started from `saved/02_stage3_heading`.
 
 Training (end): edge error about 5°, command at its hardest level (±45°), falls 0%, fence 2%, episodes 19.6 of 20 s,
 1.7 turns per 10 s.
