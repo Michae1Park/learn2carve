@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so this runs with plain python too
 
-from playground.quadruped.common import ROOT, add_train_args, make_env, new_run, train
+from playground.common import ROOT, add_train_args, make_env, new_run, train
 
 from isaaclab.app import add_launcher_args, launch_simulation
 

@@ -1,4 +1,4 @@
-"""Helpers shared by the walk/ and backflip/ train and play scripts.
+"""Helpers shared by the snowboard train/play scripts and scripts/ (run folders, --set, train loop, policy loading).
 
 Safe to import before Isaac Sim launches (only `train` / `load_policy` / `make_env` touch Isaac, and they import
 it lazily, so call them inside ``launch_simulation``).
@@ -10,10 +10,10 @@ from pathlib import Path
 
 import yaml
 
-HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[1]
-LOG_ROOT = ROOT / "logs/playground/quadruped"
-sys.path.insert(0, str(ROOT))  # so `playground.quadruped.*` imports without scripts/py
+ROOT = Path(__file__).resolve().parents[1]
+CFG_DIR = ROOT / "playground/snowboard"  # ppo.yaml / sac.yaml
+LOG_ROOT = ROOT / "logs/playground/snowboard"
+sys.path.insert(0, str(ROOT))  # so `playground.*` imports without scripts/py
 
 
 def add_train_args(parser, default_timesteps: int | None = None):
@@ -52,14 +52,13 @@ def parse_overrides(pairs: list[str]) -> dict:
     return out
 
 
-def load_agent_cfg(algo: str, cfg_dir: Path = HERE) -> dict:
+def load_agent_cfg(algo: str, cfg_dir: Path = CFG_DIR) -> dict:
     return yaml.safe_load((cfg_dir / f"{algo}.yaml").read_text())
 
 
-def new_run(args, task: str, cfg_dir: Path = HERE, log_root: Path = LOG_ROOT, **extra) -> tuple[Path, dict, dict]:
+def new_run(args, task: str, cfg_dir: Path = CFG_DIR, log_root: Path = LOG_ROOT, **extra) -> tuple[Path, dict, dict]:
     """Create <log_root>/<time>_<algo>_<task>/ with a run.yaml. Returns (run_dir, run, agent_cfg).
 
-    cfg_dir / log_root default to the quadruped's; other playgrounds (e.g. playground/snowboard) pass their own.
     """
     agent_cfg = load_agent_cfg(args.algo, cfg_dir)
     run_dir = log_root / f"{datetime.now():%Y-%m-%d_%H-%M-%S}_{args.algo}_{task}"
@@ -136,7 +135,7 @@ def train(raw_env, agent_cfg: dict, run_dir: Path, run: dict, seed: int, init_fr
     env.close()
 
 
-def load_policy(raw_env, run: dict, run_dir: Path, checkpoint: str, cfg_dir: Path = HERE):
+def load_policy(raw_env, run: dict, run_dir: Path, checkpoint: str, cfg_dir: Path = CFG_DIR):
     """Wrap the env for skrl and load a trained agent in eval mode. Returns (env, agent)."""
     from isaaclab_rl.skrl import SkrlVecEnvWrapper
     from skrl.utils.runner.torch import Runner

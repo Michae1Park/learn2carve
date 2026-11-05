@@ -21,7 +21,7 @@ the fences: crossing one ends the episode.
 | `train.py`, `play.py` | Train / ride a policy |
 | `ppo.yaml` | Networks + PPO hyperparameters (skrl) |
 
-Shared helpers (run folders, `--set`, train loop, policy loading) come from `playground/quadruped/common.py`.
+Shared helpers (run folders, `--set`, train loop, policy loading) come from `playground/common.py`.
 Runs land in `logs/playground/snowboard/<date>_<time>_ppo_<task>/`.
 
 ## Train and play
@@ -44,7 +44,7 @@ run (end: done / fell / fence, seconds, speed, edge angle, heading / slip / line
 saves the longest run's track, with the target line and the fences, to `<run>/trail.png` (downhill = down). With `--livestream`, the same
 track is drawn on the snow behind the rider (blue strips; width = snow the board sweeps sideways).
 
-**Camera:** free by default, like the quadruped's. It starts like a filmed carving clip: low on the snow
+**Camera:** free by default. It starts like a filmed carving clip: low on the snow
 (0.6 m) just past the end of the run, looking back up at the start through a 35 mm lens (`--focal`), so the
 rider carves toward you against the sky. Then it's yours: orbit, pan, zoom. `--cam_x <m>` moves it along the
 run; `--follow` tracks the rider instead.
@@ -58,8 +58,7 @@ a crest closes it above the start, low enough that the bottom camera sees sky ab
 poles fences the piste at **±20 m** (a 40 m piste, from just above the start to 400 m down). All of it is visual
 only (the physics is one tilted plane), but the env ends an episode when the board crosses a fence line.
 
-Other options are the quadruped's: `--checkpoint`, `--num_envs`, `--set`, `--suppress_warnings`, `--livestream`
-(see `playground/quadruped/README.md`).
+Other options: `--checkpoint`, `--num_envs`, `--set`, `--suppress_warnings`, `--livestream`.
 
 **TensorBoard:** `.venv-sim/bin/tensorboard --logdir logs/playground/snowboard --bind_all`. Watch
 `Episode_Termination/fell` and `/fence`, `Episode_Snow/seconds`, `err_heading_deg`, `err_slip_deg` and

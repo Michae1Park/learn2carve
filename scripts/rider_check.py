@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from playground.quadruped.common import parse_overrides, quiet_physx_tensors
+from playground.common import parse_overrides, quiet_physx_tensors
 
 from isaaclab.app import add_launcher_args, launch_simulation
 

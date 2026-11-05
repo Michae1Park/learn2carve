@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from playground.quadruped.common import load_policy, make_env
+from playground.common import load_policy, make_env
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
