@@ -425,9 +425,10 @@ def _fit_boots(stage, root: str, cfg: RiderSpawnCfg) -> None:
         prim = stage.GetPrimAtPath(f"{root}/joints/{joint}")
         for axis, half in BOOT_RANGE_DEG.items():
             centre = cfg.boot_center_deg.get(f"{dof}_{axis}", 0.0)
+            lo, hi = cfg.boot_range_deg.get(axis, (-half, half))  # (below, above) the stance angle [deg]
             limit = UsdPhysics.LimitAPI(prim, f"rot{axis.upper()}")
-            limit.GetLowAttr().Set(centre - half)
-            limit.GetHighAttr().Set(centre + half)
+            limit.GetLowAttr().Set(centre + lo)
+            limit.GetHighAttr().Set(centre + hi)
             drive = UsdPhysics.DriveAPI(prim, f"rot{axis.upper()}")
             drive.GetStiffnessAttr().Set(drive.GetStiffnessAttr().Get() * BOOT_STIFFNESS)
             drive.GetDampingAttr().Set(drive.GetDampingAttr().Get() * BOOT_STIFFNESS)
@@ -557,6 +558,7 @@ class RiderSpawnCfg(UsdFileCfg):
     compliant_drives: bool = False  # per-group stiffness (COMPLIANT) instead of the stock uniform, very stiff drives
     knee_rotation: bool = False  # knees get a ±20° axial twist (2 DoF each)
     stiff_boots: bool = False  # snowboard boots: ankles held near their stance angle (BOOT_RANGE_DEG), 3× stiffer
+    boot_range_deg: dict = {}  # {axis: (low, high)} about the stance angle [deg]; default BOOT_RANGE_DEG ±half
     boot_center_deg: dict = {}  # {ankle joint: stance angle [deg]}; filled by rider_cfg from the stance
     ankle_range_deg: dict = {}  # {"x" | "y" | "z": half range [deg]}: wider ankle limits about 0; {} = stock
     torso_twist_deg: float = 0.0  # abdomen_z half range [deg]; 0 = stock (±50°)

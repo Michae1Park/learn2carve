@@ -124,6 +124,10 @@ class CarveEnvCfg(DirectRLEnvCfg):
     # heel side only: as the edge action goes below 0 (heel), these joints also move by edge⁻ × rad, so the hips
     # sit back behind the heel edge (getting off a toe carve needs the pelvis behind the board, not just ankles)
     synergy_heel_rad: dict = {}
+    # toe side only, the same way: as the edge action goes above 0 (toe), these joints move by edge⁺ × rad (squat:
+    # knees bend, hips flex) so the toe edge comes from driving the knees down, not from the ankles
+    synergy_toe_rad: dict = {}
+    boot_range_deg: dict = {}  # stiff_boots: {"x"|"y"|"z": [low, high]} about the stance angle [deg]
     rider_to_height: bool = False  # scale the humanoid (stock 1.612 m) to config.yaml's rider height
     stance_width: float | None = None  # binding centre to centre [m]; None = config.yaml (0.52)
     torso_twist_deg: float = 0.0  # abdomen_z half range [deg], 0 = stock ±50° (the stance already twists +48°)
@@ -192,6 +196,7 @@ def apply_rider_options(cfg: CarveEnvCfg) -> None:
         compliant_drives=cfg.compliant_drives, board_flex=cfg.board_flex, stiff_boots=cfg.stiff_boots,
         knee_rotation=cfg.knee_rotation, ankle_range_deg=dict(cfg.ankle_range_deg),
         torso_twist_deg=cfg.torso_twist_deg, stance_width=cfg.stance_width, arm_stiffness_scale=cfg.arm_stiffness_scale,
+        boot_range_deg={k: tuple(v) for k, v in cfg.boot_range_deg.items()},
         scale_factor=rider_scale() if cfg.rider_to_height else 1.0,
     )
     cfg.scene.board_contact.prim_path = "{ENV_REGEX_NS}/Robot/board" + (".*" if cfg.board_flex else "")
@@ -277,6 +282,9 @@ class CarveEnv(DirectRLEnv):
             for row, table in enumerate((self.cfg.synergy_edge_rad, self.cfg.synergy_lean_rad)):
                 for name, rad in table.items():
                     self.synergy_rad[row, joints.index(name if name in joints else f"{name}:0")] = rad  # knee_rotation
+            self.toe_rad = torch.zeros(len(joints), device=self.device)
+            for name, rad in self.cfg.synergy_toe_rad.items():
+                self.toe_rad[joints.index(name if name in joints else f"{name}:0")] = rad
             self.heel_rad = torch.zeros(len(joints), device=self.device)
             for name, rad in self.cfg.synergy_heel_rad.items():
                 self.heel_rad[joints.index(name if name in joints else f"{name}:0")] = rad
@@ -352,6 +360,7 @@ class CarveEnv(DirectRLEnv):
             target[:, self.actuated] += residual * self.action_scale * self.actions
             target += self.synergy @ self.synergy_rad
             target += (-self.synergy[:, :1]).clamp(min=0.0) * self.heel_rad
+            target += self.synergy[:, :1].clamp(min=0.0) * self.toe_rad
         else:
             target[:, self.actuated] += self.action_scale * self.actions
         target = target.clamp(self.joint_lower, self.joint_upper)
