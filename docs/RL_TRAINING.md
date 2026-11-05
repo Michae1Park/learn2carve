@@ -32,8 +32,8 @@ emerged on its own.
 | Mode | Command |
 |---|---|
 | Timed (stage 2) | $\theta^*(t) = A \mathrm{clip}\big(1.8 \sin(2\pi t / T + \varphi),\ -1,\ 1\big)$: a trapezoid heel → flat → toe |
-| **Heading** (stage 3) | Hold one edge at $\pm A$ until the turn has come round, $\psi$ past $\pm 40°$ across the hill, then ramp through flat to the other edge over 0.6 s. Never sooner than 1 s, never later than 4 s on one edge |
-| Centring (stage 3) | The 40° switch heading moves 2° per metre off the piste centre (capped at ±10°): the turn back toward the centre runs longer, the one away from it ends sooner, so the S stays between the fences |
+| **Heading** (stage 3) | Hold one edge at $\pm A$ until the turn has come round, $\psi$ past $\pm 50°$ across the hill, then ramp through flat to the other edge over 0.6 s. Never sooner than 1 s, never later than 4 s on one edge |
+| Centring (stage 3) | The 50° switch heading moves 2° per metre off the piste centre (capped at ±25°): the turn back toward the centre runs longer, the one away from it ends sooner, so the S stays between the fences |
 
 **Curriculum.** The amplitude $A$ and period $T$ step from easy to hard by a level in $[0, 1]$ that rises while the
 running edge error is below 12° and falls above 24°. The policy sees the command now, +0.3 s and +0.6 s.
@@ -44,7 +44,7 @@ running edge error is below 12° and falls above 24°. The policy sees the comma
 |---|---|---|---|---|---|---|
 | 1. Hold a carve | `train_stage1_carve.sh` | Balanced on an edge | 4 s | 7° | Hold the balanced edge | 5–7.5 m/s |
 | **2. Change edges** | `train_stage2_transition.sh` | Balanced on an edge (80% toe), 50% from recorded toe-carve states | 10 s | 7° | Timed, ±15 → 30°, $T$ 6 → 4 s | 4–5.5 m/s |
-| **3. Full S** | `train_stage3_full_s.sh` | Flat, heading within ±20° of the fall line, 4–5.5 m/s; 30% recorded states | 20 s | 9° | Heading (40°) + centring, ±25 → 45° | free (eval mean 7.9 m/s) |
+| **3. Full S** | `train_stage3_full_s.sh` | Flat, heading within ±20° of the fall line, 4–5.5 m/s; 30% recorded states | 20 s | 9° | Heading + centring, ±25 → 45° | free (eval mean 7.9 m/s) |
 
 **Stage 1 is skipped.** Stage 2 warm-started from stage 1 never learned to change edges (it kept holding the edge
 stage 1 taught); stage 2 from scratch learns the hold anyway, because its episodes start in a carve. The demo runs
@@ -100,7 +100,7 @@ Nothing rewards speed, staying alive, posture or style: survival pays only throu
 | Toe → heel never learned | The board could not leave a low toe carve under any forced action: the torso twist sat at its limit | Rider rebuild ([humanoid model §6](HUMANOID_MODEL.md#6-rider-options-carveenvcfg-flags---set)) |
 | Boots added | Edge and lean actions flipped every step, the rider shook | Action smoothing |
 | Grab as a Gaussian, $\sigma$ = 0.25 / 0.6 m | The toe-turn hand sat 0.9 m away with no pull | Linear in distance to 1.2 m |
-| Edge change on a timer | Turns stopped short or drifted toward a fence | Heading switch with centring |
+| Edge change on a timer | Turns stopped short of 50° or drifted toward a fence | Heading switch with centring |
 
 ## 5. PPO
 
@@ -133,21 +133,19 @@ Diagnostics:
 | `scripts/jitter_probe.py` | Which joints shake: velocity and step-to-step velocity change per joint, action change per step |
 | `scripts/grab_probe.py` | How close each inside hand gets to its grab point, per turn side |
 
-## 7. Results (`saved/04_stage3_tighter`)
+## 7. Results (`saved/03_stage3_centred`)
 
-Stage 3 plus `edge_cmd_heading_deg=40 edge_cmd_center_max_deg=10` (the script's defaults are 50° and ±25°),
-warm-started from `saved/03_stage3_centred`, 16 000 steps.
+| | Training (end) | Eval (90 s) |
+|---|---|---|
+| Runs reaching the end of the course | episodes 19.6 of 20 s | **5 of 5** |
+| Falls / fence | 0% / 2% | 0 / 0 |
+| Edge error | 5° at ±45° | |
+| Edge (toe / heel) | | mean 42° / 38°, max 52° / 48° |
+| Slip | | 2.5°: a clean carve, a thin line |
+| Turns | 1.7 per 10 s | 3–4 per run, an edge change every ~3.8 s |
+| Track | | −13 to +8 m from the centre (fences at ±20 m) |
 
-| | Eval (90 s) |
-|---|---|
-| Runs reaching the end of the course | **5 of 5**, in 15–17.5 s |
-| Turns | 4–5 per 100 m run (03: 3–4) |
-| Edge (toe / heel), longest run | mean 43° / 38°, max 57° / 48° |
-| Slip | ~3°: a clean carve, a thin line |
-| Speed, longest run | 3.9–10.4 m/s, mean 7.9 |
-| Track | within ±15 m of the centre (fences at ±20 m) |
+![Track of the longest eval run: a thin centred S down 100 m](../saved/03_stage3_centred/trail.png)
 
-![Track of the longest eval run: a thin centred S down 100 m](../saved/04_stage3_tighter/trail.png)
-
-**Open.** The board skids briefly through each edge change. The earlier run (`03_stage3_centred`, switch at 50°) overshot,
-with headings of 56–91° across the hill at the switch, aimed at 50°.
+**Open.** Turns overshoot (the heading reaches 56–91° across the hill at the switch, aimed at 50–60°), and the board
+skids briefly through each edge change.
