@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="460" viewBox="0 0 1200 460" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
-  <title>Snowboard top view to scale: 152 cm long, 289 mm at the tips, 246 mm at the waist, 1.14 m effective edge, bindings 52 cm apart at +42 and +27 degrees, regular posi-posi stance facing the toe edge, nose to the left</title>
+  <title>Snowboard top view to scale: 152 cm long, 289 mm at the tips, 246 mm at the waist, 1.14 m effective edge, bindings 56 cm apart at +54 and +45 degrees, regular posi-posi stance facing the toe edge, nose to the left</title>
   <defs>
     <marker id="dim" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#374151"/>
@@ -30,11 +30,11 @@
   <path class="guide" d="M885,120 L885,340"/>
 
   <!-- bindings: centre at setback ± stance/2, toe direction at (alpha - 90°); boots 245 mm long -->
-  <g transform="translate(722,230) rotate(48)"><rect x="-61.25" y="-25" width="122.5" height="50" rx="14" class="foot"/></g>
-  <g transform="translate(462,230) rotate(63)"><rect x="-61.25" y="-25" width="122.5" height="50" rx="14" class="foot"/></g>
+  <g transform="translate(732.5,230) rotate(36)"><rect x="-61.25" y="-25" width="122.5" height="50" rx="14" class="foot"/></g>
+  <g transform="translate(452.5,230) rotate(45)"><rect x="-61.25" y="-25" width="122.5" height="50" rx="14" class="foot"/></g>
   </g>
-  <text x="478" y="124" class="sub" text-anchor="middle">front +42°</text>
-  <text x="738" y="124" class="sub" text-anchor="middle">back +27°</text>
+  <text x="467.5" y="124" class="sub" text-anchor="middle">front +54°</text>
+  <text x="747.5" y="124" class="sub" text-anchor="middle">back +45°</text>
 
   <!-- labels -->
   <text x="140" y="236" class="name">Nose</text>
@@ -47,8 +47,8 @@
   <text x="600" y="384" class="dimtext" text-anchor="middle">length 1.52 m</text>
   <path class="dimline" d="M315,424 L885,424"/>
   <text x="600" y="446" class="dimtext" text-anchor="middle">effective edge L = 1.14 m (contact points)</text>
-  <path class="dimline" d="M478,96 L738,96"/>
-  <text x="608" y="86" class="dimtext" text-anchor="middle">stance 0.52 m</text>
+  <path class="dimline" d="M467.5,96 L747.5,96"/>
+  <text x="607.5" y="86" class="dimtext" text-anchor="middle">stance 0.56 m</text>
   <path class="dimline" d="M1080,158 L1080,302"/>
   <text x="1092" y="226" class="dimtext">289 mm</text>
   <text x="1092" y="248" class="dimtext">tips</text>

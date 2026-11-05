@@ -2,10 +2,11 @@
 
 The board is one rigid link authored onto the humanoid at spawn (`envs/rider.py::_author_board`), with dimensions
 from a real 152 cm all-mountain board. PhysX sees a thin box that touches frictionless snow; everything the board's
-*shape* does on snow (sidecut, grip) lives in the [snow model](SNOW_MODEL.md). Knobs: `config.yaml` → `board`,
-`rider`. SI units.
+*shape* does on snow (sidecut, grip) lives in the [snow model](SNOW_MODEL.md). The round tips, stripes and chevrons are
+visual only (no collision, no mass). The board is not scaled with the rider (the humanoid is scaled to 1.65 m).
+Knobs: `config.yaml` → `board`, `rider`; the demo run overrides the stance and binding angles (below). SI units.
 
-![Snowboard top view to scale: sidecut, effective edge, bindings at +42 and +27 degrees](rider/board_top.svg)
+![Snowboard top view to scale: sidecut, effective edge, bindings at +54 and +45 degrees](rider/board_top.svg)
 
 ## 1. Geometry
 
@@ -39,19 +40,23 @@ first), heel edge counter-clockwise.
 
 | Binding | Foot | Position $x$ | Angle $\alpha$ | Toe direction |
 |---|---|---|---|---|
-| Front | Left | $s + b/2 = +0.245$ m | +42° | yaw $\alpha - 90° = -48°$ |
-| Back | Right | $s - b/2 = -0.275$ m | +27° | yaw $-63°$ |
+| Front | Left | $s + b/2 = +0.265$ m | +54° | yaw $\alpha - 90° = -36°$ |
+| Back | Right | $s - b/2 = -0.295$ m | +45° | yaw $-45°$ |
 
-**Regular, posi-posi stance:** left foot forward, and both bindings angled toward the nose (+42° / +27°), the forward
-stance used for carving. Not duck (front +, back −). Stance width $b = 0.52$ m, setback $s = -15$ mm (toward the
+**Regular, posi-posi stance:** left foot forward, and both bindings angled toward the nose (+54° / +45°), the forward
+stance used for carving. Not duck (front +, back −). Stance width $b = 0.56$ m, setback $s = -15$ mm (toward the
 tail). The picture shows the nose on the left.
+
+The demo run sets `binding_angles_deg=[54, 45]` and `stance_width=0.56` (with the `squat4` stance file from
+`scripts/make_stance.py`). `config.yaml` still defaults to +42° / +27° and 0.52 m, which a flatter stance would need
+a re-made stance file for.
 
 Both feet are welded to the board: the front binding is a tree joint, the back one a loop-closing constraint (see
 [humanoid model §3](HUMANOID_MODEL.md#3-board-binding)).
 
 ## 4. Two-half board: torsion, camber, flex, progressive sidecut
 
-`--set board_flex=true`. The board becomes **two rigid halves** (nose, tail), each a box of half the length, joined at
+**Opt-in, off in the demo run** (the demo rides the rigid board of §1). `--set board_flex=true`: the board becomes **two rigid halves** (nose, tail), each a box of half the length, joined at
 the centre by a spring joint with two DoFs. The policy can't drive it: it bends and twists only under the rider's
 load.
 
@@ -89,7 +94,7 @@ $$\kappa = \underbrace{\frac{c}{R(s)\cos\bar\theta}}_{\text{sidecut}} + \underbr
 | **Torsion**: radius vs tail edge (nose 35°) | 6.24 / 6.23 m untwisted, 7.03 / 7.02 m with the tail at 10° |
 
 In the rider, standing still: body weight (664 N) presses the camber flat ($c$ = 0.99), with 56–59% of the load on the
-nose (the front knee is bent more).
+nose (the front knee is bent more). Measured with an earlier stance, not re-checked on the current one.
 
 ## Still not modelled
 
