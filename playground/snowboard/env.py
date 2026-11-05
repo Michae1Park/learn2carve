@@ -106,6 +106,9 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_pose_ref = 0.0
     rew_tilt = 0.0  # per s, × clip((torso tilt - tilt_free_deg) / 20°): a toe carve bowed past ~65° cannot get back to the heel
     tilt_free_deg = 50.0
+    rew_grab = 0.0  # per s: inside hand reaches toward the board (heel turn: right hand -> toe edge at the front foot;
+    # toe turn: left hand -> heel edge at the back foot), exp(-(d / grab_sigma_m)²), while command and board are on that side
+    grab_sigma_m = 0.25
     rew_rise = 0.0  # per s, while the command crosses flat (|cmd| < 8°): × clip((pelvis height - 0.35 m) / 0.2 m), rise to change edges
     # stage 1 (carve controller): start every episode already in a balanced carve, board on edge θ with
     # sin θ = v² / (g cos(slope) · R_sc), heel or toe, and command that edge for the whole episode (no transitions)
@@ -368,6 +371,32 @@ class SnowboardEnv(CarveEnv):
             time_out = time_out | (x > self.cfg.run_length)
         return fallen | self.out_of_bounds, time_out
 
+    def _grab_reward(self, theta: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """exp(-(d/σ)²) of the inside hand to its grab point, gated by side; and that distance [m]."""
+        from isaaclab.utils.math import quat_apply_inverse
+
+        if not hasattr(self, "grab_ids"):
+            names = self.robot.body_names
+            self.grab_ids = [names.index(n) for n in ("right_hand", "left_hand", "left_foot", "right_foot")]
+        rh, lh, lf, rf = self.grab_ids
+        qb = self.body_quat(self.board_id)
+        pb = self.body_pos(self.board_id)
+        local = lambda i: quat_apply_inverse(qb, self.body_pos(i) - pb)
+        # toe side of the board: where the front foot's toes point, in the board's lateral (y) axis
+        toe_fwd = quat_apply_inverse(qb, quat_apply(self.body_quat(lf), torch.tensor([1.0, 0.0, 0.0], device=self.device).expand(self.num_envs, 3)))
+        s_toe = torch.sign(toe_fwd[:, 1]).where(toe_fwd[:, 1].abs() > 1e-3, torch.ones_like(toe_fwd[:, 1]))
+        w = self.board_half_width
+        zeros = torch.zeros_like(s_toe)
+        heel_target = torch.stack([local(lf)[:, 0], s_toe * w, zeros + 0.05], -1)  # right hand, toe edge, front foot
+        toe_target = torch.stack([local(rf)[:, 0], -s_toe * w, zeros + 0.05], -1)  # left hand, heel edge, back foot
+        cmd = self.edge_command()
+        heel_turn = (cmd < -math.radians(10.0)) & (theta < -math.radians(10.0))
+        toe_turn = (cmd > math.radians(10.0)) & (theta > math.radians(10.0))
+        d = torch.where(heel_turn, (local(rh) - heel_target).norm(dim=-1),
+                        torch.where(toe_turn, (local(lh) - toe_target).norm(dim=-1), zeros))
+        r = torch.exp(-(d / self.cfg.grab_sigma_m).square()) * (heel_turn | toe_turn).float()
+        return r, d
+
     def _rsi_record(self):
         cfg = self.cfg
         if not hasattr(self, "rsi_root"):
@@ -524,6 +553,12 @@ class SnowboardEnv(CarveEnv):
                 r = cfg.rew_tilt * excess * self.step_dt
                 reward += r
                 self._track("rew_tilt", r)
+            if cfg.rew_grab:
+                r, d = self._grab_reward(theta)
+                r = cfg.rew_grab * r * self.step_dt
+                reward += r
+                self._track("rew_grab", r)
+                self._track("grab_dist_m", d)
             if cfg.rew_rise:
                 near_flat = (self.edge_command().abs() < math.radians(8.0)).float()
                 tall = ((self.pelvis_height() - 0.35) / 0.2).clamp(0.0, 1.0)
