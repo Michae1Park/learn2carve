@@ -127,6 +127,9 @@ class SnowboardEnvCfg(CarveEnvCfg):
     edge_cmd_min_s = 1.0
     edge_cmd_max_s = 3.0
     edge_cmd_ramp_s = 0.6
+    # heading mode, centring: the switch heading moves by this many degrees per metre off the piste centre (capped at
+    # ±25°), so the turn back toward the centre runs longer and the one away from it ends sooner
+    edge_cmd_center_deg_per_m = 0.0
     edge_cmd_sharpness = 1.8  # trapezoid sharpness: clamp(hold · sin, -1, 1)
     edge_cmd_level_up_deg = 12.0  # mean tracking error below this raises the level, above 2× lowers it
     edge_cmd_level_steps = 2000  # steps to go from level 0 to 1 at best
@@ -304,7 +307,11 @@ class SnowboardEnv(CarveEnv):
         now = self.edge_command()
         self.cmd_since += self.step_dt
         psi, h = self.path_heading(), math.radians(cfg.edge_cmd_heading_deg)
-        done_turn = ((self.cmd_side < 0) & (psi > h)) | ((self.cmd_side > 0) & (psi < -h))
+        # heel turns swing the heading + (toward +y), toe turns -: off-centre at +y, end the heel turn sooner and
+        # carry the toe turn further, and the other way round at -y
+        y = self.position()[:, 1]
+        shift = torch.deg2rad((cfg.edge_cmd_center_deg_per_m * y).clamp(-25.0, 25.0))
+        done_turn = ((self.cmd_side < 0) & (psi > h - shift)) | ((self.cmd_side > 0) & (psi < -h - shift))
         switch = (self.cmd_since > cfg.edge_cmd_min_s) & (done_turn | (self.cmd_since > cfg.edge_cmd_max_s))
         self.cmd_from = torch.where(switch, now, self.cmd_from)
         self.cmd_side = torch.where(switch, -self.cmd_side, self.cmd_side)
