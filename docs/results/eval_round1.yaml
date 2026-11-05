@@ -1,4 +1,4 @@
-- run: 12-31-13_ppo_carve
+- run: ppo_carve
   task: carve
   seed: 1
   overrides: {}
@@ -10,7 +10,7 @@
   edge_deg: 16.4656
   speed_err: 5.0494
   seconds: 11.9333
-- run: 12-31-33_ppo_carve
+- run: ppo_carve
   task: carve
   seed: 1
   overrides:
@@ -32,7 +32,7 @@
   edge_deg: 5.1497
   speed_err: 5.1572
   seconds: 11.7698
-- run: 12-31-53_ppo_carve
+- run: ppo_carve
   task: carve
   seed: 2
   overrides: {}
@@ -44,7 +44,7 @@
   edge_deg: 17.0519
   speed_err: 5.17
   seconds: 11.9327
-- run: 12-32-13_ppo_carve
+- run: ppo_carve
   task: carve
   seed: 2
   overrides:
@@ -66,7 +66,7 @@
   edge_deg: 4.9155
   speed_err: 4.6125
   seconds: 10.4153
-- run: 12-32-33_ppo_carve
+- run: ppo_carve
   task: carve
   seed: 3
   overrides: {}
@@ -78,7 +78,7 @@
   edge_deg: 17.3382
   speed_err: 5.2706
   seconds: 11.9333
-- run: 12-32-53_ppo_carve
+- run: ppo_carve
   task: carve
   seed: 3
   overrides:
@@ -100,7 +100,7 @@
   edge_deg: 9.7098
   speed_err: 4.975
   seconds: 11.0403
-- run: 12-33-13_ppo_skid
+- run: ppo_skid
   task: skid
   seed: 1
   overrides:
