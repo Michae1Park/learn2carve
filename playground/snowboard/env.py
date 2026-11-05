@@ -76,6 +76,12 @@ class SnowboardEnvCfg(CarveEnvCfg):
     speed_cap = 12.0  # m/s; a clean carve on 15° settles at ~19-21 m/s, so the cap forces turns finished across the hill
     # carve: edged × turning × clean × low = clip(|θ|/edge_target) · clip(|ψ̇_board|/0.5) · exp(-(β/σ)²) · (0.5 + 0.5 low)
     carve_start_toe_frac = 0.5  # carve_start: share of episodes that start on the toe edge (toe -> heel is the hard switch)
+    # reset from recorded states: a share of episodes starts from a toe carve recorded mid-episode (low, bowed),
+    # with the edge command at the toe peak, so toe -> heel is practised from where the rider actually gets stuck
+    rsi_frac = 0.0
+    rsi_buffer = 8192
+    rsi_min_s = 3.0  # record only states this far into an episode
+    rsi_toe_deg = 12.0  # ... on the toe edge at least this much
     lying_deg = 80.0  # torso tilt from vertical that counts as lying (a deep toe-side carve bows it 55-70°)
     fall_height = 0.15  # pelvis above the snow [m]: at the apex of a deep carve the hips are ~0.2 m from it (was 0.45)
     rew_carve = 2.0
@@ -362,7 +368,57 @@ class SnowboardEnv(CarveEnv):
             time_out = time_out | (x > self.cfg.run_length)
         return fallen | self.out_of_bounds, time_out
 
+    def _rsi_record(self):
+        cfg = self.cfg
+        if not hasattr(self, "rsi_root"):
+            n_b, d = cfg.rsi_buffer, self.device
+            self.rsi_root = torch.zeros(n_b, 13, device=d)
+            self.rsi_qpos = torch.zeros(n_b, self.stance_pos.shape[1], device=d)
+            self.rsi_qvel = torch.zeros_like(self.rsi_qpos)
+            self.rsi_slip = torch.zeros(n_b, *self.slip_z.shape[1:], device=d)
+            self.rsi_ema = torch.zeros(n_b, device=d)
+            self.rsi_count, self.rsi_next = 0, 0
+        theta = self.snow_info["edge_angle"] if self.snow_info else torch.zeros(self.num_envs, device=self.device)
+        ok = (self.episode_length_buf * self.step_dt > cfg.rsi_min_s) & (theta > math.radians(cfg.rsi_toe_deg))
+        ok &= ~self.reset_buf if hasattr(self, "reset_buf") else ok
+        ids = ok.nonzero().squeeze(-1)
+        if len(ids) == 0:
+            return
+        ids = ids[torch.randperm(len(ids), device=self.device)[:32]]
+        k = len(ids)
+        slots = (torch.arange(k, device=self.device) + self.rsi_next) % cfg.rsi_buffer
+        data = self.robot.data
+        pose = data.root_link_pose_w.torch[ids].clone()
+        pose[:, :3] -= self.scene.env_origins[ids]
+        self.rsi_root[slots] = torch.cat([pose, data.root_com_vel_w.torch[ids]], dim=-1)
+        self.rsi_qpos[slots] = data.joint_pos.torch[ids]
+        self.rsi_qvel[slots] = data.joint_vel.torch[ids]
+        self.rsi_slip[slots] = self.slip_z[ids]
+        self.rsi_ema[slots] = self.edge_ema[ids]
+        self.rsi_next = (self.rsi_next + k) % cfg.rsi_buffer
+        self.rsi_count = min(cfg.rsi_buffer, self.rsi_count + k)
+
+    def _rsi_restore(self, env_ids: torch.Tensor):
+        if not hasattr(self, "rsi_root") or self.rsi_count < 256:
+            return
+        pick = env_ids[torch.rand(len(env_ids), device=self.device) < self.cfg.rsi_frac]
+        if len(pick) == 0:
+            return
+        src = torch.randint(0, self.rsi_count, (len(pick),), device=self.device)
+        root = self.rsi_root[src].clone()
+        root[:, :3] += self.scene.env_origins[pick]
+        self.robot.write_root_link_pose_to_sim_index(root_pose=root[:, :7], env_ids=pick)
+        self.robot.write_root_com_velocity_to_sim_index(root_velocity=root[:, 7:], env_ids=pick)
+        self.robot.write_joint_position_to_sim_index(position=self.rsi_qpos[src], env_ids=pick)
+        self.robot.write_joint_velocity_to_sim_index(velocity=self.rsi_qvel[src], env_ids=pick)
+        self.slip_z[pick] = self.rsi_slip[src]
+        self.edge_ema[pick] = self.rsi_ema[src]
+        self.cmd_phase[pick] = math.pi / 2  # at the toe peak: the flip to the heel comes a quarter period in
+        self.rsi_started[pick] = 1.0
+
     def _get_rewards(self) -> torch.Tensor:
+        if self.cfg.rsi_frac > 0:
+            self._rsi_record()
         self._update_turns()
         cfg = self.cfg
         speed, e_slip, psi = self.board_speed(), self.slip_error(), self.path_heading()
@@ -638,7 +694,12 @@ class SnowboardEnv(CarveEnv):
         lv, (p0, p1) = self.cmd_level, self.cfg.edge_cmd_period_s
         self.cmd_period[env_ids] = (p0 + lv * (p1 - p0)) * (0.85 + 0.3 * torch.rand(m, device=self.device))
         self.cmd_phase[env_ids] = math.pi * (torch.rand(m, device=self.device) < 0.5).float()  # heel or toe first
+        if not hasattr(self, "rsi_started"):
+            self.rsi_started = torch.zeros(self.num_envs, device=self.device)
+        self.rsi_started[env_ids] = 0.0
         super()._reset_idx(env_ids)
+        if self.cfg.rsi_frac > 0:
+            self._rsi_restore(env_ids)
         index_fill_(self.actions, env_ids, 0.0)
         if self.cfg.synergy:
             self.synergy = self.synergy.clone()
@@ -663,6 +724,12 @@ class SnowboardEnv(CarveEnv):
         log["Episode_Termination/fell"] = (self.reset_terminated[env_ids] & ~self.out_of_bounds[env_ids]).float().mean()
         log["Episode_Termination/fence"] = self.out_of_bounds[env_ids].float().mean()
         log["Episode_Snow/seconds"] = seconds.mean()
+        if hasattr(self, "rsi_started"):
+            rsi = self.rsi_started[env_ids] > 0
+            log["RSI/share"] = rsi.float().mean()
+            if rsi.any():
+                log["RSI/turns_per_10s"] = (self.turn_count[env_ids][rsi] / seconds[rsi] * 10).mean()
+                log["RSI/fell"] = (self.reset_terminated[env_ids][rsi]).float().mean()
         if hasattr(self, "fall_why"):
             for i, why in enumerate(("height", "lying", "sitting", "on_side", "reverse")):
                 log[f"Episode_Termination/why_{why}"] = self.fall_why[env_ids, i].float().mean()
