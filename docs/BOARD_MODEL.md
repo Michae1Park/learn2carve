@@ -1,10 +1,13 @@
 # Board model
 
-The board is one rigid link authored onto the humanoid at spawn (`envs/rider.py::_author_board`), with dimensions
-from a real 152 cm all-mountain board. PhysX sees a thin box that touches frictionless snow; everything the board's
-*shape* does on snow (sidecut, grip) lives in the [snow model](SNOW_MODEL.md). The round tips, stripes and chevrons are
-visual only (no collision, no mass). The board is not scaled with the rider (the humanoid is scaled to 1.65 m).
-Knobs: `config.yaml` → `board`, `rider`; SI units.
+The board is a real 152 cm all-mountain board, authored onto the humanoid at spawn as one rigid link
+(`envs/rider.py::_author_board`).
+
+- **Physics:** PhysX sees only a thin box that touches frictionless snow. Everything the board's *shape* does on snow
+  (sidecut, edge grip) lives in the [snow model](SNOW_MODEL.md).
+- **Looks:** the round tips, stripes and chevrons are visual only (no collision, no mass).
+- **Scale:** the board is not scaled with the rider (the humanoid is scaled to 1.65 m).
+- **Knobs:** `config.yaml` → `board`, `rider`. SI units.
 
 ![Snowboard top view to scale: sidecut, effective edge, bindings at +54 and +45 degrees](rider/board_top.svg)
 
@@ -13,7 +16,7 @@ Knobs: `config.yaml` → `board`, `rider`; SI units.
 | Parameter | Value | Used for |
 |---|---|---|
 | Length | 1.52 m | Collision box |
-| Waist width $w$ | 246 mm | Collision box, trail width |
+| Waist width $w$ | 246 mm | Collision box, board lift on edge (`w/2 · sin θ`) |
 | Tip width | 289 mm | Sidecut depth |
 | Effective edge $L$ | 1.14 m | Sidecut radius, yaw-torque cap |
 | Thickness | 8 mm | Collision box |
@@ -53,34 +56,28 @@ tail). The picture shows the nose on the left.
 Both feet are welded to the board: the front binding is a tree joint, the back one a loop-closing constraint (see
 [humanoid model §3](HUMANOID_MODEL.md#3-board-binding)).
 
-## 4. Two-half board: torsion, camber, flex, progressive sidecut
+## 4. Two-half board (opt-in, not used in the demo)
 
-**Opt-in, off in the demo run** (the demo rides the rigid board of §1). `--set board_flex=true`: the board becomes **two rigid halves** (nose, tail), each a box of half the length, joined at
-the centre by a spring joint with two DoFs. The policy can't drive it: it bends and twists only under the rider's
-load.
+`--set board_flex=true` splits the board into **two rigid halves** (nose, tail) joined at the centre by a spring joint
+the policy can't drive. The demo rides the rigid board of §1; this extension is validated against the snow model but
+never trained on.
 
 | DoF | Spring | Rest | Effect |
 |---|---|---|---|
 | `board_flex:0` roll | Torsion, 5 N·m/° | 0 | Nose and tail can edge differently |
-| `board_flex:1` pitch | Bend, set so $N_c$ presses it flat | $-\varphi_0$ (camber) | Unloaded, only the tips touch |
+| `board_flex:1` pitch | Bend, set so $N_c = 330$ N ($\approx \tfrac{1}{2}mg$) presses it flat | $-\varphi_0$ (5 mm camber) | Unloaded, only the tips touch |
 
-$$\varphi_0 = \frac{4h}{L} \quad (h = 5\text{ mm camber}) \qquad k_{\text{bend}} = \frac{N_c\,L}{4\,\varphi_0} \quad (N_c = 330\text{ N} \approx \tfrac{1}{2}\,mg)$$
+Each half glides and grips on its own edge angle and load. Steering is one arc for the whole board, with four effects
+on top of the rigid-board sidecut:
 
-The two angled boxes are a two-segment **camber profile**: the collision shape itself bends, instead of one flat
-8 mm box.
+| Effect | Formula | Result |
+|---|---|---|
+| **Camber** | $c = 1 + q_{\text{bend}}/\varphi_0$, $\varphi_0 = 4h/L$ | No sidecut until the load presses the board flat |
+| **Progressive sidecut** | $R(s) = R_{sc} + (R_{\text{tip}} - R_{sc})\,s^2$ | 7.6 m centred, 10.7 m at a tip ($s$ = nose share − tail share) |
+| **Torsion** | $\bar\theta = \sum_i w_i\theta_i$, $w_i = N_i/N$ | The arc follows the load-weighted edge angle |
+| **Flex** | $(N - N_c)_+\,\frac{L}{6\,EI}\sin\lvert\bar\theta\rvert$, $EI = 1500$ N·m² | Load beyond $N_c$ tightens the arc |
 
-Each half glides and grips on **its own edge angle $\theta_i$ and load $N_i$** (from its own contact sensor). Steering
-is one arc for the whole board:
-
-$$\kappa = \underbrace{\frac{c}{R(s)\cos\bar\theta}}_{\text{sidecut}} + \underbrace{(N - N_c)_+\,\frac{L}{6\,EI}\,\sin\lvert\bar\theta\rvert}_{\text{flex}}$$
-
-| Symbol | Meaning |
-|---|---|
-| $\bar\theta = \sum_i w_i\theta_i$ | Load-weighted edge angle, $w_i = N_i / N$ (**torsion**) |
-| $s = w_{\text{nose}} - w_{\text{tail}}$ | Centre of pressure, −1 (all tail) … +1 (all nose) |
-| $R(s) = R_{sc} + (R_{\text{tip}} - R_{sc})\,s^2$ | **Progressive sidecut**: 7.6 m centred, 10.7 m at a tip |
-| $c = 1 + q_{\text{bend}}/\varphi_0 \in [0, 1]$ | **Camber** pressed flat: 0 at rest (tips only, no sidecut), 1 flat (from the joint angle) |
-| $EI = 1500$ N·m² | **Flex**: load beyond $N_c$ bends the board into a tighter arc |
+$$\kappa = \frac{c}{R(s)\cos\bar\theta} + (N - N_c)_+\,\frac{L}{6\,EI}\,\sin\lvert\bar\theta\rvert$$
 
 ### Validation (`scripts/validate_board.py`)
 
@@ -92,10 +89,7 @@ $$\kappa = \underbrace{\frac{c}{R(s)\cos\bar\theta}}_{\text{sidecut}} + \underbr
 | **Progressive sidecut**: radius vs centre of pressure (θ = 20°) | 7.15 / 7.14 m centred, 10.06 / 10.05 m all on one half |
 | **Torsion**: radius vs tail edge (nose 35°) | 6.24 / 6.23 m untwisted, 7.03 / 7.02 m with the tail at 10° |
 
-In the rider, standing still: body weight (664 N) presses the camber flat ($c$ = 0.99), with 56–59% of the load on the
-nose (the front knee is bent more). Measured with an earlier stance, not re-checked on the current one.
-
-## Still not modelled
+## Not modelled (two-half board)
 
 | Gap | Effect |
 |---|---|

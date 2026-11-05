@@ -82,6 +82,25 @@ $$R = \max\!\left(R_{sc}\cos\theta,\ \frac{v^2}{\mu(\theta)\,g}\right) \qquad v_
 `tests/test_snow.py` pins the same behaviour, plus signs and edge cases (a flat board doesn't steer, an airborne board
 has no grip).
 
+## 5. In the trained carve
+
+The demo rides the **rigid board** (`board_flex` off). Measured from the longest eval ride of each policy, on
+samples with $\lvert\theta\rvert > 15°$:
+
+| Ride | Speed | Path turn rate ÷ sidecut prediction $v / (R_{sc}\cos\theta)$ | Slip |
+|---|---|---|---|
+| Stage 2 (7° slope) | 4.5–7 m/s | **1.05** (median): the board follows its sidecut arc | — |
+| Stage 3, the demo (9° slope) | 4.5–10.7 m/s, mean 7.9 | **0.63** (median): turns wider than the sidecut arc | 2.5° mean |
+
+The board doesn't skid in either (slip stays small): in the demo the turn opens through the steering cap $h$ instead.
+Only ~20% of its edged samples are grip-limited by the steady-state estimate $v^2 / (\mu g) > R_{sc}\cos\theta$; the
+rest of the gap is likely the load dropping through the edge changes (lower $N$, lower $h$) and the yaw-torque cap,
+not isolated yet.
+
+Even at full sidecut, turn sharpness is set by $R_{sc}\cos\theta$, which shrinks slowly with edge angle: 7.1 m at
+20°, 5.8 m at 40°, 3.8 m at 60°. A 40° carve turns only ~20% tighter than a 20° one. Sharper turns at high edge angles
+need the two-half board's progressive sidecut and flex.
+
 ## Not modelled
 
 | Left out | Effect |

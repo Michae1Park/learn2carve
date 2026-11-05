@@ -66,7 +66,7 @@ The loop needs a converged solver: **32 position / 4 velocity iterations** at 12
 
 The default pose $q^{\text{stance}}$ is *found by simulation*, not hand-set: the pelvis and board are welded to the
 world at the target poses, the binding constraints pull the feet onto the board, and the drives settle. The result
-closes both loops exactly and is saved to `envs/assets/stance.yaml`.
+closes both loops exactly and is saved to `envs/assets/stance_<front>_<back>[_<tag>].yaml`.
 
 | Setting | Value |
 |---|---|
@@ -91,7 +91,7 @@ $$q^* = \operatorname{clip}\!\left(q^{\text{stance}} + 0.3 \cdot 0.5 \cdot \tfra
 | Term | Value |
 |---|---|
 | Joint residual $a_j \in [-1, 1]$ | $\pm15\%$ of each joint's half-range (action scale 0.5 × synergy residual 0.3); **arms ±50%** (`arm_action_scale=0.5`, no residual factor) |
-| Edge synergy $s_0$ | Both ankle flex +0.5 rad and both knees +0.6 rad per unit: one number rolls the board onto its edge (+1 toe) |
+| Edge synergy $s_0$ | Both ankle flex +0.5 rad and both knees +0.6 rad per unit: one number rolls the board onto its edge (+1 toe). With boots the ankle part is clipped to the boots' −5…+15°, so the knees do most of it |
 | Lean synergy $s_1$ | Abdomen side-bend 0.9 rad per unit (counter-angulation) |
 | Toe extra | For $s_0 > 0$ also knees +0.4 rad and hips pitch −0.3 rad per unit: the toe edge comes from a squat |
 | Smoothing | Both the synergy and joint actions go through an EMA, weight 0.35 on the new value (~0.1 s at 30 Hz), to stop chatter |
