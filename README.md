@@ -1,34 +1,85 @@
-# learn2carve
+<p align="center">
+  <h1 align="center">Learn2Carve</h1>
+  <p align="center">
+    <strong>A simulated snowboarder that learns aggressive carving turns with reinforcement learning</strong>
+  </p>
+  <p align="center">
+    <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12+-blue.svg" alt="Python 3.12+"></a>
+    <a href="https://developer.nvidia.com/isaac/sim"><img src="https://img.shields.io/badge/Isaac%20Sim-6.1-76B900.svg?logo=nvidia&logoColor=white" alt="Isaac Sim 6.1"></a>
+    <a href="https://github.com/isaac-sim/IsaacLab"><img src="https://img.shields.io/badge/Isaac%20Lab-3.0-76B900.svg" alt="Isaac Lab 3.0"></a>
+    <img src="https://img.shields.io/badge/RL-PPO-orange.svg" alt="PPO">
+  </p>
+</p>
 
-### Demo: snowboard playground (plain RL, no demo clip yet)
+---
 
-<table>
-  <tr><th></th><th>Front</th><th>Top</th></tr>
-  <tr>
-    <th>Carve</th>
-    <td><img src="docs/demo/carve_front.gif" width="400" alt="Carve, front view: the rider tips the board on edge through S-turns"></td>
-    <td><img src="docs/demo/carve_top.gif" width="400" alt="Carve, top view: a thin S line"></td>
-  </tr>
-  <tr>
-    <th>Skid</th>
-    <td><img src="docs/demo/skid_front.gif" width="400" alt="Skid, front view: the board pivots and slides through each turn"></td>
-    <td><img src="docs/demo/skid_top.gif" width="400" alt="Skid, top view: a wide S"></td>
-  </tr>
-  <tr>
-    <th>Side slip</th>
-    <td><img src="docs/demo/sideslip_front.gif" width="400" alt="Side slip, front view: board across the fall line on the heel edge"></td>
-    <td><img src="docs/demo/sideslip_top.gif" width="400" alt="Side slip, top view: a straight band as wide as the board is long"></td>
-  </tr>
-</table>
+<p align="center">
+  <b>Author:</b> <a href="https://michae1park.github.io">Michael Park</a>
+</p>
 
-<em>Follow cameras on one evaluation run each, real time. Blue = the snow the board sweeps (wider = more sideways
-slip). Recorded with <code>playground/snowboard/play.py &lt;run&gt; --record docs/demo/&lt;task&gt;</code>; see
-<a href="playground/snowboard/README.md">playground/snowboard</a>.</em>
+---
+
+## Overview
+
+Learn2Carve teaches a humanoid to ride a snowboard down a slope and lay it over on its edge, drawing a thin S line
+instead of skidding or sliding sideways. The snow, the board and their interaction are modelled from scratch, and
+the rider is trained with PPO in stages.
+
+<div align="center">
+
+<img src="docs/demo/carve_front.gif" width="600" alt="Carving, front view">
+
+<img src="docs/demo/carve_top.gif" width="600" alt="Carving, top view: a thin S line">
+
+<!-- TODO: screenshot of Isaac Sim training with many humanoids densely placed -->
+<img src="docs/demo/training.png" width="820" alt="Isaac Sim training: many riders in parallel">
+
+</div>
+
+## What it does
+
+- **Models** the snow, the board and their interaction (glide, sidecut steering, edge grip).
+- **Rider:** a modified AMP humanoid, strapped to the board through bindings.
+- **Reward:** designed to favour a high edge angle, a thin track and turns that finish across the hill.
+- **Training:** PPO in stages in Isaac Sim, up to full S turns at 30–50° edge angles.
+
+## Models
 
 | Doc | What |
 |---|---|
-| [Overview](docs/OVERVIEW.md) | Pipeline, stages, layout, stack |
-| [Humanoid model](docs/HUMANOID_MODEL.md) | Bodies, joints, drives, binding loop, stance |
-| [Board model](docs/BOARD_MODEL.md) | Geometry, sidecut, bindings |
-| [Snow model](docs/SNOW_MODEL.md) | Glide, sidecut steering, edge grip, validation |
-| [RL training](docs/RL_TRAINING.md) | MDP, reward, PPO, learning curves |
+| [Board](docs/BOARD_MODEL.md) | Geometry, sidecut, bindings |
+| [Snow](docs/SNOW_MODEL.md) | Glide, sidecut steering, edge grip, validation |
+| [Humanoid](docs/HUMANOID_MODEL.md) | Bodies, joints, drives, binding loop, stance |
+
+## Training
+
+| Doc | What |
+|---|---|
+| [RL training](docs/RL_TRAINING.md) | MDP, reward, staged PPO, learning curves |
+
+## Quick start
+
+**Prerequisites**
+
+- Ubuntu 24.04
+- GPU VRAM 16 GB+
+- Python 3.12+, `git`, `curl`
+- About 30 GB of disk for Isaac Sim
+
+**Installation**
+
+```bash
+git clone https://github.com/michae1park/learn2carve.git
+cd learn2carve
+scripts/install.sh   # Isaac Sim 6.1 + Isaac Lab + skrl, into .venv-sim
+```
+
+**Run locally**
+
+```bash
+# Watch a trained rider carve
+scripts/py playground/snowboard/play.py saved/best_carve
+
+# Train from scratch
+scripts/py playground/snowboard/train.py --task carve --set slope_deg=10
+```
