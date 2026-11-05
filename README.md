@@ -31,7 +31,7 @@ modified for snowboarding, and is trained with PPO in stages.
 
 <img src="docs/demo/carve_top.gif" width="600" alt="Carving, top view: a thin S line">
 
-<img src="docs/demo/training.gif" width="820" alt="Isaac Sim: 64 riders in parallel, as in training">
+<img src="docs/demo/training.gif" width="600" alt="Isaac Sim: 64 riders in parallel, as in training">
 
 </div>
 
