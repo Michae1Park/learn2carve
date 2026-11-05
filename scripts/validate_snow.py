@@ -21,7 +21,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from envs.snow import SnowParams, _smoothstep, air_drag, snow_wrench  # noqa: E402
+from envs.snow import SnowParams, smoothstep, air_drag, snow_wrench  # noqa: E402
 from tests.test_snow import DT, UP, quat_yaw_roll, simulate  # noqa: E402
 
 G = 9.81
@@ -29,7 +29,7 @@ OUT = ROOT / "docs/snow/validation.png"
 
 
 def expected_radius(theta_deg: float, v: float, p: SnowParams) -> float:
-    mu = p.mu_flat + (p.mu_edge - p.mu_flat) * _smoothstep(torch.tensor(math.radians(theta_deg)), 0.0,
+    mu = p.mu_flat + (p.mu_edge - p.mu_flat) * smoothstep(torch.tensor(math.radians(theta_deg)), 0.0,
                                                            math.radians(p.edge_lock_deg)).item()
     return max(p.sidecut_radius * math.cos(math.radians(theta_deg)), v**2 / (mu * G))
 

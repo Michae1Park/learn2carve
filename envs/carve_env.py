@@ -1,20 +1,10 @@
-"""Carve environment: rider + board on an infinite groomed slope (Stage 1; Stage 3 adds AMP on top).
+"""Rider + board on an infinite groomed slope, forked from Isaac Lab's ``humanoid_amp`` env.
 
-Forked from Isaac Lab's ``contrib/humanoid_amp`` env. Changes:
+Two ways to make the slope (``CarveEnvCfg.mountain``): tilted gravity over flat ground, or a tilted ground plane
+dressed as a mountain. Either way every body state is read and written in the slope frame (x downhill, y across,
+z snow normal), so a policy trained in one rides in the other. Actions are joint targets around the stance.
 
-- Rider = humanoid + snowboard articulation (envs/rider.py), scaled to the rider's mass.
-- Slope, two ways (``CarveEnvCfg.mountain``), both infinite and edge-free:
-  - False (Stage 1 default): flat frictionless ground, gravity tilted by the slope angle.
-  - True: the ground plane itself is tilted, gravity points straight down, and the slope is dressed as a mountain
-    (envs/mountain.py). This is what you see in the viewer.
-  Either way the env works in the **slope frame**: x = downhill along the snow, y = across, z = snow normal. Every
-  body state is read through ``body_pos`` / ``body_quat`` / ``body_lin_vel`` / ``body_ang_vel`` (slope frame) and
-  written back through ``to_world``, so observations, rewards and the snow model are identical in both modes and a
-  policy trained in one rides in the other. With tilted gravity the slope frame is the world frame.
-- Snow = envs/snow.py forces on the board each physics step (PhysX only supplies the normal contact).
-- Actions = joint targets around the snowboard stance (zero action holds the stance), not around mid-range.
-
-Import this module only after Isaac Sim has launched (it pulls in USD).
+Import after Isaac Sim launched.
 """
 
 from __future__ import annotations
@@ -36,21 +26,26 @@ from isaaclab_physx.physics import PhysxCfg
 from isaaclab_physx.sim.spawners.materials import PhysxRigidBodyMaterialCfg
 
 from . import config
-from .rider import rider_cfg, rider_scale
+from .rider import camber_angle, rider_cfg, rider_scale
 from .snow import SnowParams, air_drag, board_wrench, snow_wrench
 
-STANCE_DIR = config.ROOT / "envs/assets/stances"  # stance_<front>_<back>[_<tag>].yaml
+GRAVITY = 9.81
+POLICY_HZ = 30
+STANCE_DIR = config.ROOT / "envs/assets/stances"
+KEY_BODIES = ["right_hand", "left_hand", "right_foot", "left_foot"]
+STOCK_JOINTS = 28
+AMP_OBS_EXTRA = 25  # root height, tangent/normal, root velocities, key body offsets
+BOARD_OBS = 6
+FLEX_BOARD_OBS = 4
+SYNERGIES = 2
+PASSIVE_GROUPS = {"ankle": 6, "neck": 3, "knee:2": 2}  # DoF-name substring -> DoF count
+IDENTITY_XYZW = (0.0, 0.0, 0.0, 1.0)
 
 
 def stance_file(binding_angles: tuple[float, float] | None = None, tag: str = ""):
-    """stance_<front>_<back>.yaml for the binding angles (default: config.yaml's), made by scripts/make_stance.py.
-    A tag (e.g. "squat4") picks a variant: stance_<front>_<back>_<tag>.yaml."""
-    suffix = f"_{tag}" if tag else ""
     front, back = binding_angles if binding_angles is not None else config.load()["rider"]["binding_angles_deg"]
+    suffix = f"_{tag}" if tag else ""
     return STANCE_DIR / f"stance_{front:g}_{back:g}{suffix}.yaml"
-
-
-KEY_BODIES = ["right_hand", "left_hand", "right_foot", "left_foot"]
 
 
 def load_stance(binding_angles: tuple[float, float] | None = None, tag: str = "") -> dict:
@@ -63,19 +58,24 @@ def load_stance(binding_angles: tuple[float, float] | None = None, tag: str = ""
 
 def tilted_gravity(angle_deg: float) -> tuple[float, float, float]:
     a = math.radians(angle_deg)
-    return (9.81 * math.sin(a), 0.0, -9.81 * math.cos(a))
+    return (GRAVITY * math.sin(a), 0.0, -GRAVITY * math.cos(a))
+
+
+def slope_quat(angle_deg: float) -> tuple[float, float, float, float]:
+    a = math.radians(angle_deg)
+    return (0.0, math.sin(a / 2), 0.0, math.cos(a / 2))
 
 
 @configclass
 class CarveSceneCfg(InteractiveSceneCfg):
-    robot = None  # set in CarveEnvCfg.__post_init__ (needs the stance file)
+    robot = None  # set from the stance in CarveEnvCfg
     board_contact = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/board")
     ground = AssetBaseCfg(
         prim_path="/World/ground",
         collision_group=-1,
         spawn=sim_utils.GroundPlaneCfg(
             size=(2000.0, 2000.0),
-            # frictionless: the snow model supplies all tangential forces. "min" wins over the bodies' materials.
+            # the snow model supplies all tangential forces; "min" overrides the bodies' own friction
             physics_material=PhysxRigidBodyMaterialCfg(
                 static_friction=0.0, dynamic_friction=0.0, restitution=0.0, friction_combine_mode="min"
             ),
@@ -87,59 +87,52 @@ class CarveSceneCfg(InteractiveSceneCfg):
 @configclass
 class CarveEnvCfg(DirectRLEnvCfg):
     episode_length_s = 20.0
-    decimation = 4  # 120 Hz physics, 30 Hz policy
+    decimation = 4
 
-    observation_space = 81 + 6  # AMP humanoid observation + board/snow state
+    observation_space = 81 + 6  # recomputed from the rider options
     action_space = 28
     state_space = 0
-    action_scale = 0.5  # fraction of each joint's half-range that a ±1 action moves the target
+    action_scale = 0.5  # fraction of each joint's half-range per unit action
 
-    mountain: bool = False  # True: tilted snowy mountain + real gravity; False: flat ground + tilted gravity
-    slope_deg: float | None = None  # None: config.yaml slope.angle_deg
-    fall_height = 0.45  # pelvis height above the snow [m] below which the rider has fallen
-    start_speed = (2.0, 5.0)  # m/s along the board at reset
-    start_yaw_deg = 0.0  # ± board heading from the fall line at reset
+    mountain: bool = False
+    slope_deg: float | None = None  # None: config.yaml
+    fall_height = 0.45  # m, pelvis above the snow
+    start_speed = (2.0, 5.0)  # m/s
+    start_yaw_deg = 0.0
 
-    # rider model (defaults = the baseline 28-DoF rider at 120 Hz); see docs/HUMANOID_MODEL.md
-    physics_hz: int = 120  # PhysX rate; the policy stays at 30 Hz (decimation = physics_hz / 30)
-    solver_iterations: tuple[int, int] = (32, 4)  # PhysX (position, velocity) iterations
-    thoracic: bool = False  # + 2-DoF thoracic joint (chest roll / pitch): 30 DoF
+    # rider model, see docs/HUMANOID_MODEL.md
+    physics_hz: int = 120
+    solver_iterations: tuple[int, int] = (32, 4)
+    thoracic: bool = False
     neck_stiffness_scale: float = 1.0
-    spine_damping_scale: float = 1.0  # abdomen + thorax damping × this (anti-jerk)
-    pelvis_mass_frac: float | None = None  # pelvis share of the rider's mass (stock: 0.126); None = stock
-    arm_action_scale: float | None = None  # shoulders + elbows: fraction of half-range per unit action (not × synergy_residual)
-    arm_stiffness_scale: float = 1.0  # shoulder + elbow PD gains × this
-    leg_action_scale: float | None = None  # hips + knees: fraction of half-range per unit action; None = action_scale
-    knee_rotation: bool = False  # + ±20° axial twist per knee (2 DoF)
-    # joint groups left to their drives (held at the stance target, still physical) instead of the policy: fewer
-    # actions to explore. Any of PASSIVE_GROUPS: "ankle" (6, boots), "neck" (3), "knee:2" (2, knee twist)
-    passive_joints: tuple[str, ...] = ()
-    # synergy actions (the double pendulum's two, scripts/pendulum_rl.py): 2 extra actions in front of the joints.
-    # edge: ankle flex + knees, both legs (+1 -> heel edge, scripts/edge_sweep.py); lean: torso side bend
-    # (abdomen_x). The 28 joint actions become a residual at synergy_residual of their range.
+    spine_damping_scale: float = 1.0
+    pelvis_mass_frac: float | None = None
+    arm_action_scale: float | None = None  # not reduced by synergy_residual
+    arm_stiffness_scale: float = 1.0
+    leg_action_scale: float | None = None
+    knee_rotation: bool = False
+    passive_joints: tuple[str, ...] = ()  # PASSIVE_GROUPS left to their drives at the stance target
+
+    # synergy actions: two extra actions ahead of the joints, which become a residual at synergy_residual
     synergy: bool = False
     synergy_edge_rad: dict = {"left_ankle_y": 0.5, "right_ankle_y": 0.5, "left_knee": 0.6, "right_knee": 0.6}
     synergy_lean_rad: dict = {"abdomen_x": 0.9}
     synergy_residual: float = 0.3
-    joint_smooth: float = 1.0  # the same EMA on the joint (residual) actions; 1 = none
-    synergy_smooth: float = 1.0  # EMA weight of a new synergy action per step (1 = none; 0.35 ≈ 0.1 s at 30 Hz): stops edge/lean chatter
-    # heel side only: as the edge action goes below 0 (heel), these joints also move by edge⁻ × rad, so the hips
-    # sit back behind the heel edge (getting off a toe carve needs the pelvis behind the board, not just ankles)
-    synergy_heel_rad: dict = {}
-    # toe side only, the same way: as the edge action goes above 0 (toe), these joints move by edge⁺ × rad (squat:
-    # knees bend, hips flex) so the toe edge comes from driving the knees down, not from the ankles
-    synergy_toe_rad: dict = {}
-    boot_range_deg: dict = {}  # stiff_boots: {"x"|"y"|"z": [low, high]} about the stance angle [deg]
-    rider_to_height: bool = False  # scale the humanoid (stock 1.612 m) to config.yaml's rider height
-    stance_width: float | None = None  # binding centre to centre [m]; None = config.yaml (0.56)
-    torso_twist_deg: float = 0.0  # abdomen_z half range [deg], 0 = stock ±50° (the stance already twists +48°)
-    ankle_range_deg: dict = {}  # wider ankle limits, e.g. {"x": 45, "y": 80, "z": 55} (envs/rider.py _widen_ankles)
-    stiff_boots: bool = False  # ankles held near their stance angle, 3× stiffer (envs/rider.py BOOT_RANGE_DEG)
-    compliant_drives: bool = False  # per-joint-group stiffness (envs/rider.py COMPLIANT) instead of uniform, stiff
-    # board model (defaults = one rigid board); see docs/BOARD_MODEL.md
-    board_flex: bool = False  # two halves + torsion/camber spring; progressive sidecut and flex in the snow model
-    stance_tag: str = ""  # stance file variant, e.g. "squat" (scripts/make_stance.py --hip_height 0.5 --tag squat)
-    binding_angles_deg: tuple[float, float] | None = None  # (front, back); None = config.yaml. Needs its stance file
+    joint_smooth: float = 1.0  # EMA weight of a new action; 1 = none
+    synergy_smooth: float = 1.0
+    synergy_heel_rad: dict = {}  # added × edge⁻, so the hips sit back behind the heel edge
+    synergy_toe_rad: dict = {}  # added × edge⁺, so the toe edge comes from the knees, not the ankles
+
+    boot_range_deg: dict = {}
+    rider_to_height: bool = False
+    stance_width: float | None = None
+    torso_twist_deg: float = 0.0
+    ankle_range_deg: dict = {}
+    stiff_boots: bool = False
+    compliant_drives: bool = False
+    board_flex: bool = False  # see docs/BOARD_MODEL.md
+    stance_tag: str = ""
+    binding_angles_deg: tuple[float, float] | None = None
 
     sim: SimulationCfg = SimulationCfg(
         dt=1 / 120,
@@ -155,59 +148,78 @@ class CarveEnvCfg(DirectRLEnvCfg):
         self.scene.robot = rider_cfg(stance=load_stance())
 
 
-# Joint groups the policy can leave passive (held by their drives at the stance target): DoF-name substring -> count
-PASSIVE_GROUPS = {"ankle": 6, "neck": 3, "knee:2": 2}
+def configured_binding_angles(cfg: CarveEnvCfg) -> tuple[float, float] | None:
+    return tuple(cfg.binding_angles_deg) if cfg.binding_angles_deg is not None else None
 
 
 def num_joints(cfg: CarveEnvCfg) -> int:
-    """All rider DoF in the articulation, actuated or not (the board's spring DoFs included)."""
-    return 28 + (2 if cfg.thoracic else 0) + (2 if cfg.knee_rotation else 0) + (2 if cfg.board_flex else 0)
+    """Every DoF in the articulation, the board's spring included."""
+    extra = sum(2 for enabled in (cfg.thoracic, cfg.knee_rotation, cfg.board_flex) if enabled)
+    return STOCK_JOINTS + extra
 
 
 def is_passive(cfg: CarveEnvCfg, joint: str) -> bool:
-    return joint.startswith("board_flex") or any(g in joint for g in cfg.passive_joints)
+    return joint.startswith("board_flex") or any(group in joint for group in cfg.passive_joints)
 
 
 def num_dof(cfg: CarveEnvCfg) -> int:
-    """Actuated (policy-driven) DoF = the action size."""
-    passive = sum(n for g, n in PASSIVE_GROUPS.items() if g in cfg.passive_joints
-                  and (g != "knee:2" or cfg.knee_rotation))
-    return num_joints(cfg) - (2 if cfg.board_flex else 0) - passive
+    """Policy-driven DoF."""
+    passive = sum(count for group, count in PASSIVE_GROUPS.items()
+                  if group in cfg.passive_joints and (group != "knee:2" or cfg.knee_rotation))
+    board_spring = 2 if cfg.board_flex else 0
+    return num_joints(cfg) - board_spring - passive
 
 
 def base_obs_size(cfg: CarveEnvCfg) -> int:
-    """AMP humanoid observation (2 · all DoF + 25) + board/snow state (6, + 4 for a two-half board)."""
-    return 2 * num_joints(cfg) + 25 + 6 + (4 if cfg.board_flex else 0)
+    return 2 * num_joints(cfg) + AMP_OBS_EXTRA + BOARD_OBS + (FLEX_BOARD_OBS if cfg.board_flex else 0)
 
 
 def apply_rider_options(cfg: CarveEnvCfg) -> None:
-    """Rebuild what depends on the rider options. Runs in __init__: --set overrides land after __post_init__."""
-    if cfg.physics_hz % 30:
-        raise ValueError(f"physics_hz must be a multiple of the 30 Hz policy rate, got {cfg.physics_hz}")
-    cfg.decimation = cfg.physics_hz // 30
+    """Runs in __init__ because --set overrides land after __post_init__."""
+    if cfg.physics_hz % POLICY_HZ:
+        raise ValueError(f"physics_hz must be a multiple of the {POLICY_HZ} Hz policy rate, got {cfg.physics_hz}")
+    cfg.decimation = cfg.physics_hz // POLICY_HZ
     cfg.sim.dt = 1.0 / cfg.physics_hz
     cfg.sim.render_interval = cfg.decimation
-    cfg.action_space = num_dof(cfg) + (2 if cfg.synergy else 0)
-    if cfg.observation_space == 81 + 6:  # the carve env's own default; subclasses set theirs from base_obs_size
+    cfg.action_space = num_dof(cfg) + (SYNERGIES if cfg.synergy else 0)
+    if cfg.observation_space == 81 + 6:
         cfg.observation_space = base_obs_size(cfg)
-    angles = tuple(cfg.binding_angles_deg) if cfg.binding_angles_deg is not None else None
     cfg.scene.robot = rider_cfg(
-        stance=load_stance(angles, cfg.stance_tag), binding_angles=angles, solver_iterations=tuple(cfg.solver_iterations),
-        thoracic=cfg.thoracic,
-        neck_stiffness_scale=cfg.neck_stiffness_scale, spine_damping_scale=cfg.spine_damping_scale,
-        compliant_drives=cfg.compliant_drives, board_flex=cfg.board_flex, stiff_boots=cfg.stiff_boots,
-        knee_rotation=cfg.knee_rotation, ankle_range_deg=dict(cfg.ankle_range_deg),
-        torso_twist_deg=cfg.torso_twist_deg, stance_width=cfg.stance_width, arm_stiffness_scale=cfg.arm_stiffness_scale,
-        boot_range_deg={k: tuple(v) for k, v in cfg.boot_range_deg.items()},
+        stance=load_stance(configured_binding_angles(cfg), cfg.stance_tag),
+        binding_angles=configured_binding_angles(cfg),
+        solver_iterations=tuple(cfg.solver_iterations),
+        stance_width=cfg.stance_width,
         scale_factor=rider_scale() if cfg.rider_to_height else 1.0,
+        thoracic=cfg.thoracic,
+        knee_rotation=cfg.knee_rotation,
+        board_flex=cfg.board_flex,
+        stiff_boots=cfg.stiff_boots,
+        compliant_drives=cfg.compliant_drives,
+        neck_stiffness_scale=cfg.neck_stiffness_scale,
+        spine_damping_scale=cfg.spine_damping_scale,
+        arm_stiffness_scale=cfg.arm_stiffness_scale,
+        ankle_range_deg=dict(cfg.ankle_range_deg),
+        torso_twist_deg=cfg.torso_twist_deg,
+        boot_range_deg={axis: tuple(r) for axis, r in cfg.boot_range_deg.items()},
     )
     cfg.scene.board_contact.prim_path = "{ENV_REGEX_NS}/Robot/board" + (".*" if cfg.board_flex else "")
 
 
-def slope_quat(angle_deg: float) -> tuple[float, float, float, float]:
-    """Slope frame → world rotation (x, y, z, w): about +y, so the slope's x (downhill) points to +x and down."""
-    a = math.radians(angle_deg)
-    return (0.0, math.sin(a / 2), 0.0, math.cos(a / 2))
+def apply_slope(cfg: CarveEnvCfg, slope_deg: float) -> tuple[float, float, float, float]:
+    """Set gravity, ground and light for the slope; returns the slope frame → world rotation."""
+    if not cfg.mountain:
+        cfg.sim.gravity = tilted_gravity(slope_deg)
+        return IDENTITY_XYZW
+    cfg.sim.gravity = (0.0, 0.0, -GRAVITY)
+    cfg.scene.ground.init_state.rot = slope_quat(slope_deg)
+    cfg.scene.light.spawn.color = (0.62, 0.76, 1.0)
+    cfg.scene.light.spawn.intensity = 1500.0  # low enough that the sun shades the slopes
+    return slope_quat(slope_deg)
+
+
+def joint_index(joints: list[str], name: str) -> int:
+    """A hinge that became a D6 (knee_rotation) is addressed by its first DoF."""
+    return joints.index(name if name in joints else f"{name}:0")
 
 
 class CarveEnv(DirectRLEnv):
@@ -215,91 +227,81 @@ class CarveEnv(DirectRLEnv):
 
     def __init__(self, cfg: CarveEnvCfg, render_mode: str | None = None, **kwargs):
         apply_rider_options(cfg)
-        # slope set here, not in __post_init__: --set overrides land after the cfg is constructed
-        slope_deg = cfg.slope_deg if cfg.slope_deg is not None else config.load()["slope"]["angle_deg"]
-        self.slope_deg = slope_deg
-        if cfg.mountain:
-            cfg.sim.gravity = (0.0, 0.0, -9.81)
-            cfg.scene.ground.init_state.rot = slope_quat(slope_deg)
-            cfg.scene.light.spawn.color = (0.62, 0.76, 1.0)  # blue sky (envs/mountain.py hides the grid, adds snow)
-            cfg.scene.light.spawn.intensity = 1500.0  # sky fill; low enough that the sun shades the slopes
-            q = slope_quat(slope_deg)
-        else:
-            cfg.sim.gravity = tilted_gravity(slope_deg)
-            q = (0.0, 0.0, 0.0, 1.0)
-        self.q_slope = torch.tensor(q, device=cfg.sim.device)  # slope frame → world
+        self.slope_deg = cfg.slope_deg if cfg.slope_deg is not None else config.load()["slope"]["angle_deg"]
+        self.q_slope = torch.tensor(apply_slope(cfg, self.slope_deg), device=cfg.sim.device)
         self.q_slope_inv = self.q_slope * torch.tensor([-1.0, -1.0, -1.0, 1.0], device=cfg.sim.device)
         super().__init__(cfg, render_mode, **kwargs)
+
         params = config.load()
         self.robot = self.scene["robot"]
         self.contact = self.scene["board_contact"]
-        names = self.robot.data.body_names
-        self.board_id = names.index("board")  # the whole board, or its nose half (frame at the board centre)
-        self.board_ids = [self.board_id] + ([names.index("board_tail")] if self.cfg.board_flex else [])
-        contact_names = self.contact.body_names
-        self.contact_ids = [contact_names.index(names[i]) for i in self.board_ids]
-        joints = self.robot.joint_names
-        self.actuated = torch.tensor([i for i, j in enumerate(joints) if not is_passive(self.cfg, j)],
-                                     device=self.device)
-        assert len(self.actuated) == num_dof(self.cfg), (len(self.actuated), num_dof(self.cfg))
-        self.bend_id = joints.index("board_flex:1") if self.cfg.board_flex else None
-        self.pelvis_id = names.index("pelvis")
-        self.torso_id = names.index("torso")
-        self.key_ids = [names.index(n) for n in KEY_BODIES]
         self.up = torch.tensor([0.0, 0.0, 1.0], device=self.device)
-
+        self._find_bodies()
         self._scale_to_rider_mass(params["rider"]["mass"])
+
         self.snow = SnowParams.from_config(params["snow"], params["board"], params["rider"]["mass"])
         self.snow_info: dict[str, torch.Tensor] = {}
-        # grip spring state (snow.py), one per board half
         self.slip_z = torch.zeros(self.num_envs, len(self.board_ids), device=self.device).squeeze(-1)
         if self.cfg.board_flex:
-            from .rider import camber_angle
-
             self.camber_rest = camber_angle(params["board"]["effective_edge"])
 
-        # stance: default joint targets, and the pelvis pose relative to the board
-        stance = load_stance(tuple(self.cfg.binding_angles_deg) if self.cfg.binding_angles_deg is not None else None,
-                             self.cfg.stance_tag)
+        stance = load_stance(configured_binding_angles(self.cfg), self.cfg.stance_tag)
         self.stance_pos = self.robot.data.default_joint_pos.torch.clone()
         self.pelvis_in_board_pos = torch.tensor(stance["pelvis_pos"], device=self.device)
         self.pelvis_in_board_quat = torch.tensor(stance["pelvis_quat"], device=self.device)
         self.board_half_thickness = params["board"]["thickness"] / 2
         self.board_half_width = params["board"]["waist_width"] / 2
 
+        self._setup_actions()
+
+    def _find_bodies(self):
+        bodies = self.robot.data.body_names
+        joints = self.robot.joint_names
+        self.board_id = bodies.index("board")
+        self.board_ids = [self.board_id] + ([bodies.index("board_tail")] if self.cfg.board_flex else [])
+        self.contact_ids = [self.contact.body_names.index(bodies[i]) for i in self.board_ids]
+        self.pelvis_id = bodies.index("pelvis")
+        self.torso_id = bodies.index("torso")
+        self.key_ids = [bodies.index(name) for name in KEY_BODIES]
+        self.actuated = torch.tensor([i for i, j in enumerate(joints) if not is_passive(self.cfg, j)],
+                                     device=self.device)
+        assert len(self.actuated) == num_dof(self.cfg), (len(self.actuated), num_dof(self.cfg))
+        self.bend_id = joints.index("board_flex:1") if self.cfg.board_flex else None
+
+    def _setup_actions(self):
+        joints = self.robot.joint_names
         limits = self.robot.data.soft_joint_pos_limits.torch[0]
         self.joint_lower, self.joint_upper = limits[:, 0], limits[:, 1]
         scale = torch.full_like(self.joint_lower, self.cfg.action_scale)
-        if self.cfg.leg_action_scale is not None:  # hips and knees drive the edge and the squat: give them more range
-            legs = [i for i, j in enumerate(self.robot.joint_names) if "hip" in j or "knee" in j]
-            scale[legs] = self.cfg.leg_action_scale
-        self.arm_joint = torch.tensor(["shoulder" in j or "elbow" in j for j in self.robot.joint_names], device=self.device)
+        if self.cfg.leg_action_scale is not None:
+            scale[[i for i, j in enumerate(joints) if "hip" in j or "knee" in j]] = self.cfg.leg_action_scale
+        self.arm_joint = torch.tensor(["shoulder" in j or "elbow" in j for j in joints], device=self.device)
         if self.cfg.arm_action_scale is not None:
             scale[self.arm_joint] = self.cfg.arm_action_scale
         self.action_scale = (scale * 0.5 * (self.joint_upper - self.joint_lower))[self.actuated]
-        self.actions = torch.zeros(self.num_envs, num_dof(self.cfg), device=self.device)  # the joint part
-        self.synergy = torch.zeros(self.num_envs, 2, device=self.device)
-        if self.cfg.synergy:
-            self.synergy_rad = torch.zeros(2, len(joints), device=self.device)
-            for row, table in enumerate((self.cfg.synergy_edge_rad, self.cfg.synergy_lean_rad)):
-                for name, rad in table.items():
-                    self.synergy_rad[row, joints.index(name if name in joints else f"{name}:0")] = rad  # knee_rotation
-            self.toe_rad = torch.zeros(len(joints), device=self.device)
-            for name, rad in self.cfg.synergy_toe_rad.items():
-                self.toe_rad[joints.index(name if name in joints else f"{name}:0")] = rad
-            self.heel_rad = torch.zeros(len(joints), device=self.device)
-            for name, rad in self.cfg.synergy_heel_rad.items():
-                self.heel_rad[joints.index(name if name in joints else f"{name}:0")] = rad
+        self.actions = torch.zeros(self.num_envs, num_dof(self.cfg), device=self.device)
+        self.synergy = torch.zeros(self.num_envs, SYNERGIES, device=self.device)
+        if not self.cfg.synergy:
+            return
+
+        def joint_vector(table: dict) -> torch.Tensor:
+            vector = torch.zeros(len(joints), device=self.device)
+            for name, rad in table.items():
+                vector[joint_index(joints, name)] = rad
+            return vector
+
+        self.synergy_rad = torch.stack([joint_vector(self.cfg.synergy_edge_rad), joint_vector(self.cfg.synergy_lean_rad)])
+        self.toe_rad = joint_vector(self.cfg.synergy_toe_rad)
+        self.heel_rad = joint_vector(self.cfg.synergy_heel_rad)
 
     def _scale_to_rider_mass(self, rider_mass: float) -> None:
-        """The AMP humanoid is ~36 kg. Scale masses, inertias and joint gains so dynamics stay similar at 65 kg."""
+        """The AMP humanoid is ~36 kg: scale masses, inertias and joint gains to the rider's mass."""
         mass = self.robot.data.body_mass.torch.clone()
         human = [i for i in range(mass.shape[1]) if i not in self.board_ids]
         k = rider_mass / mass[0, human].sum().item()
         per_body = torch.full((mass.shape[1],), k, device=mass.device)
         per_body[self.board_ids] = 1.0
         if self.cfg.pelvis_mass_frac is not None:
-            # heavy root: the pelvis takes this share of the rider's mass, the rest scale down to keep the total
             scaled = mass[0] * per_body
             others = [i for i in human if i != self.pelvis_id]
             per_body[self.pelvis_id] *= self.cfg.pelvis_mass_frac * rider_mass / scaled[self.pelvis_id].item()
@@ -310,7 +312,7 @@ class CarveEnv(DirectRLEnv):
         self.robot.set_masses_index(masses=mass)
         self.robot.set_inertias_index(inertias=inertia)
         gain = torch.full((len(self.robot.joint_names),), k, device=mass.device)
-        gain[[i for i, j in enumerate(self.robot.joint_names) if j.startswith("board_flex")]] = 1.0  # board spring
+        gain[[i for i, j in enumerate(self.robot.joint_names) if j.startswith("board_flex")]] = 1.0
         self.robot.write_joint_stiffness_to_sim_index(stiffness=self.robot.data.joint_stiffness.torch * gain)
         self.robot.write_joint_damping_to_sim_index(damping=self.robot.data.joint_damping.torch * gain)
         self.mass_scale = k
@@ -321,10 +323,9 @@ class CarveEnv(DirectRLEnv):
 
             add_mountain(self.slope_deg)
 
-    # -- slope frame -----------------------------------------------------------------------------------------
+    # -- slope frame ------------------------------------------------------------------------------------------------
 
     def to_slope(self, v: torch.Tensor) -> torch.Tensor:
-        """World vectors/positions (..., 3) → slope frame. The slope passes through the world origin."""
         return quat_apply(self.q_slope_inv.expand(*v.shape[:-1], 4), v)
 
     def to_world(self, v: torch.Tensor) -> torch.Tensor:
@@ -346,26 +347,30 @@ class CarveEnv(DirectRLEnv):
     def body_ang_vel(self, ids) -> torch.Tensor:
         return self.to_slope(self.robot.data.body_ang_vel_w.torch[:, ids])
 
-    # -- stepping ------------------------------------------------------------------------------------------
+    def edge_angle(self) -> torch.Tensor:
+        return self.snow_info["edge_angle"] if self.snow_info else torch.zeros(self.num_envs, device=self.device)
+
+    # -- stepping ---------------------------------------------------------------------------------------------------
 
     def _pre_physics_step(self, actions: torch.Tensor):
         actions = actions.clamp(-1.0, 1.0)
         if self.cfg.synergy:
-            new, actions = actions[:, :2], actions[:, 2:]
-            a = self.cfg.synergy_smooth
-            self.synergy = new if a >= 1.0 else a * new + (1.0 - a) * self.synergy
-        b = self.cfg.joint_smooth
-        self.actions = actions if b >= 1.0 else b * actions + (1.0 - b) * self.actions
+            synergy, actions = actions[:, :SYNERGIES], actions[:, SYNERGIES:]
+            self.synergy = smooth(self.synergy, synergy, self.cfg.synergy_smooth)
+        self.actions = smooth(self.actions, actions, self.cfg.joint_smooth)
 
     def _apply_action(self):
-        target = self.stance_pos.clone()  # the board's spring DoFs keep their rest target: the policy can't drive them
+        target = self.stance_pos.clone()
         if self.cfg.synergy:
-            residual = torch.where(self.arm_joint[self.actuated], 1.0, self.cfg.synergy_residual) \
-                if self.cfg.arm_action_scale is not None else self.cfg.synergy_residual
+            if self.cfg.arm_action_scale is not None:
+                residual = torch.where(self.arm_joint[self.actuated], 1.0, self.cfg.synergy_residual)
+            else:
+                residual = self.cfg.synergy_residual
             target[:, self.actuated] += residual * self.action_scale * self.actions
+            edge = self.synergy[:, :1]
             target += self.synergy @ self.synergy_rad
-            target += (-self.synergy[:, :1]).clamp(min=0.0) * self.heel_rad
-            target += self.synergy[:, :1].clamp(min=0.0) * self.toe_rad
+            target += (-edge).clamp(min=0.0) * self.heel_rad
+            target += edge.clamp(min=0.0) * self.toe_rad
         else:
             target[:, self.actuated] += self.action_scale * self.actions
         target = target.clamp(self.joint_lower, self.joint_upper)
@@ -373,11 +378,10 @@ class CarveEnv(DirectRLEnv):
         self._apply_snow()
 
     def _apply_snow(self):
-        # all in the slope frame; the resulting forces go back to the world frame
         contact = self.contact.data.net_forces_w.torch[:, self.contact_ids]
-        normal_force = (self.to_slope(contact) * self.up).sum(-1)  # (N, halves)
+        normal_force = (self.to_slope(contact) * self.up).sum(-1)
         if self.cfg.board_flex:
-            bend = self.robot.data.joint_pos.torch[:, self.bend_id]  # -φ₀ at rest (camber), 0 pressed flat
+            bend = self.robot.data.joint_pos.torch[:, self.bend_id]  # -camber at rest, 0 pressed flat
             force, torque, self.snow_info = board_wrench(
                 self.body_quat(self.board_ids), self.body_lin_vel(self.board_ids), self.body_ang_vel(self.board_ids),
                 normal_force, self.up, self.physics_dt, self.snow, self.slip_z,
@@ -398,11 +402,11 @@ class CarveEnv(DirectRLEnv):
             is_global=True,
         )
 
-    # -- MDP -----------------------------------------------------------------------------------------------
+    # -- MDP --------------------------------------------------------------------------------------------------------
 
     def _get_observations(self) -> dict:
         data = self.robot.data
-        obs = compute_obs(
+        amp = compute_obs(
             data.joint_pos.torch,
             data.joint_vel.torch,
             self.body_pos(self.torso_id),
@@ -411,6 +415,9 @@ class CarveEnv(DirectRLEnv):
             self.body_ang_vel(self.torso_id),
             self.body_pos(self.key_ids),
         )
+        return {"policy": torch.cat([amp, self._board_obs()], dim=-1)}
+
+    def _board_obs(self) -> torch.Tensor:
         info = self.snow_info or self._zero_snow_info()
         board = torch.stack(
             [
@@ -418,27 +425,25 @@ class CarveEnv(DirectRLEnv):
                 info["v_long"],
                 info["v_lat"],
                 (self.body_ang_vel(self.board_id) * self.up).sum(-1),
-                info["normal_force"] / (9.81 * (self.snow.system_mass)),
+                info["normal_force"] / (GRAVITY * self.snow.system_mass),
                 info["grip_usage"].clamp(max=5.0),
             ],
             dim=-1,
         )
-        if self.cfg.board_flex:  # nose / tail edge angles (torsion), load on the nose, how flat the camber is
-            board = torch.cat([board, info["edge_halves"], info["load_nose"].unsqueeze(-1),
-                               info["camber_engaged"].unsqueeze(-1)], dim=-1)
-        return {"policy": torch.cat([obs, board], dim=-1)}
+        if not self.cfg.board_flex:
+            return board
+        return torch.cat([board, info["edge_halves"], info["load_nose"].unsqueeze(-1),
+                          info["camber_engaged"].unsqueeze(-1)], dim=-1)
 
     def _zero_snow_info(self) -> dict[str, torch.Tensor]:
-        z = torch.zeros(self.num_envs, device=self.device)
-        info = {k: z for k in ("edge_angle", "v_long", "v_lat", "normal_force", "grip_usage")}
+        zeros = torch.zeros(self.num_envs, device=self.device)
+        info = {k: zeros for k in ("edge_angle", "v_long", "v_lat", "normal_force", "grip_usage")}
         if self.cfg.board_flex:
-            info |= {"edge_halves": torch.zeros(self.num_envs, 2, device=self.device), "load_nose": z + 0.5,
-                     "camber_engaged": z}
+            info |= {"edge_halves": torch.zeros(self.num_envs, 2, device=self.device), "load_nose": zeros + 0.5,
+                     "camber_engaged": zeros}
         return info
 
     def _get_rewards(self) -> torch.Tensor:
-        """No task here: the tasks (playground/snowboard/env.py) define their own reward. The check scripts that
-        build this env directly only step it."""
         return torch.zeros(self.num_envs, device=self.device)
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -454,22 +459,18 @@ class CarveEnv(DirectRLEnv):
         self.slip_z[env_ids] = 0.0
         n = len(env_ids)
 
-        # board = yaw about the snow normal, then roll about its own long axis (edge angle, θ < 0: heel edge down)
-        yaw, edge, root_lin_vel, y0 = self._start_state(env_ids)
-        q_yaw, q_roll = torch.zeros(n, 4, device=self.device), torch.zeros(n, 4, device=self.device)
-        q_yaw[:, 2], q_yaw[:, 3] = torch.sin(yaw / 2), torch.cos(yaw / 2)
-        q_roll[:, 0], q_roll[:, 3] = torch.sin(edge / 2), torch.cos(edge / 2)
-        board_quat = quat_mul(q_yaw, q_roll)
-        board_pos = self.scene.env_origins[env_ids].clone()  # the env grid, laid out on the slope
-        board_pos[:, 1] += y0
-        # lowest edge just clear of the snow: lands within a step
-        board_pos[:, 2] = self.board_half_width * edge.sin().abs() + self.board_half_thickness * edge.cos() + 0.0005
+        yaw, edge, lin_vel, y_offset = self._start_state(env_ids)
+        board_quat = quat_mul(yaw_quat(yaw), roll_quat(edge))
+        board_pos = self.scene.env_origins[env_ids].clone()
+        board_pos[:, 1] += y_offset
+        lowest_edge_clearance = 0.0005
+        board_pos[:, 2] = (self.board_half_width * edge.sin().abs() + self.board_half_thickness * edge.cos()
+                           + lowest_edge_clearance)
 
-        # pelvis = board ∘ stance offset
         pelvis_pos = board_pos + quat_apply(board_quat, self.pelvis_in_board_pos.expand(n, 3))
         pelvis_quat = quat_mul(board_quat, self.pelvis_in_board_quat.expand(n, 4))
         root_vel = torch.zeros(n, 6, device=self.device)
-        root_vel[:, :3] = self.to_world(root_lin_vel)
+        root_vel[:, :3] = self.to_world(lin_vel)
 
         self.robot.write_root_link_pose_to_sim_index(
             root_pose=torch.cat([self.to_world(pelvis_pos), self.quat_to_world(pelvis_quat)], dim=-1), env_ids=env_ids
@@ -480,21 +481,30 @@ class CarveEnv(DirectRLEnv):
             velocity=torch.zeros_like(self.stance_pos[env_ids]), env_ids=env_ids
         )
 
-    def _start_state(
-        self, env_ids: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Board yaw [rad] (0 = nose down the fall line, +x), edge angle [rad], velocity (n, 3, slope frame) and
-        sideways offset from the env origin [m] for the envs being reset.
-
-        Default: flat, heading down the fall line ± start_yaw_deg, moving nose-first at start_speed. Override for
-        other starts (e.g. sideways on the heel edge for a side slip).
-        """
+    def _start_state(self, env_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """(board yaw, edge angle, slope-frame velocity, sideways offset) for the envs being reset."""
         n = len(env_ids)
         yaw = math.radians(self.cfg.start_yaw_deg) * (2 * torch.rand(n, device=self.device) - 1)
         lo, hi = self.cfg.start_speed
         speed = lo + (hi - lo) * torch.rand(n, device=self.device)
         heading = torch.stack([torch.cos(yaw), torch.sin(yaw), torch.zeros_like(yaw)], dim=-1)
         return yaw, torch.zeros_like(yaw), speed.unsqueeze(-1) * heading, torch.zeros_like(yaw)
+
+
+def smooth(previous: torch.Tensor, new: torch.Tensor, weight: float) -> torch.Tensor:
+    return new if weight >= 1.0 else weight * new + (1.0 - weight) * previous
+
+
+def yaw_quat(angle: torch.Tensor) -> torch.Tensor:
+    q = torch.zeros(*angle.shape, 4, device=angle.device)
+    q[..., 2], q[..., 3] = torch.sin(angle / 2), torch.cos(angle / 2)
+    return q
+
+
+def roll_quat(angle: torch.Tensor) -> torch.Tensor:
+    q = torch.zeros(*angle.shape, 4, device=angle.device)
+    q[..., 0], q[..., 3] = torch.sin(angle / 2), torch.cos(angle / 2)
+    return q
 
 
 @torch.jit.script
@@ -518,7 +528,7 @@ def compute_obs(
     root_angular_velocities: torch.Tensor,
     key_body_positions: torch.Tensor,
 ) -> torch.Tensor:
-    """The AMP humanoid observation (same layout as Isaac Lab's humanoid_amp, so the AMP discriminator matches)."""
+    """Same layout as Isaac Lab's humanoid_amp, so an AMP discriminator matches."""
     return torch.cat(
         (
             dof_positions,
