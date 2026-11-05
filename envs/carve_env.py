@@ -121,6 +121,8 @@ class CarveEnvCfg(DirectRLEnvCfg):
     synergy_edge_rad: dict = {"left_ankle_y": 0.5, "right_ankle_y": 0.5, "left_knee": 0.6, "right_knee": 0.6}
     synergy_lean_rad: dict = {"abdomen_x": 0.9}
     synergy_residual: float = 0.3
+    joint_smooth: float = 1.0  # the same EMA on the joint (residual) actions; 1 = none
+    synergy_smooth: float = 1.0  # EMA weight of a new synergy action per step (1 = none; 0.35 ≈ 0.1 s at 30 Hz): stops edge/lean chatter
     # heel side only: as the edge action goes below 0 (heel), these joints also move by edge⁻ × rad, so the hips
     # sit back behind the heel edge (getting off a toe carve needs the pelvis behind the board, not just ankles)
     synergy_heel_rad: dict = {}
@@ -349,8 +351,11 @@ class CarveEnv(DirectRLEnv):
     def _pre_physics_step(self, actions: torch.Tensor):
         actions = actions.clamp(-1.0, 1.0)
         if self.cfg.synergy:
-            self.synergy, actions = actions[:, :2], actions[:, 2:]
-        self.actions = actions
+            new, actions = actions[:, :2], actions[:, 2:]
+            a = self.cfg.synergy_smooth
+            self.synergy = new if a >= 1.0 else a * new + (1.0 - a) * self.synergy
+        b = self.cfg.joint_smooth
+        self.actions = actions if b >= 1.0 else b * actions + (1.0 - b) * self.actions
 
     def _apply_action(self):
         target = self.stance_pos.clone()  # the board's spring DoFs keep their rest target: the policy can't drive them
