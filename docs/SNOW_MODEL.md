@@ -84,13 +84,13 @@ has no grip).
 
 ## 5. In the trained carve
 
-The demo rides the **rigid board** (`board_flex` off). Measured from the longest eval ride of each policy (stage 3: `03_stage3_centred`, before the tighter-turn run), on
+The demo rides the **rigid board** (`board_flex` off). Measured from the longest eval ride of each policy, on
 samples with $\lvert\theta\rvert > 15°$:
 
 | Ride | Speed | Path turn rate ÷ sidecut prediction $v / (R_{sc}\cos\theta)$ | Slip |
 |---|---|---|---|
 | Stage 2 (7° slope) | 4.5–7 m/s | **1.05** (median): the board follows its sidecut arc | — |
-| Stage 3, `03_stage3_centred` (9° slope) | 4.5–10.7 m/s, mean 7.9 | **0.63** (median): turns wider than the sidecut arc | 2.5° mean |
+| Stage 3, the demo (9° slope) | 4.5–10.7 m/s, mean 7.9 | **0.63** (median): turns wider than the sidecut arc | 2.5° mean |
 
 The board doesn't skid in either (slip stays small): in the demo the turn opens through the steering cap $h$ instead.
 Only ~20% of its edged samples are grip-limited by the steady-state estimate $v^2 / (\mu g) > R_{sc}\cos\theta$; the

@@ -149,3 +149,7 @@ Diagnostics:
 
 **Open.** Turns overshoot (the heading reaches 56–91° across the hill at the switch, aimed at 50–60°), and the board
 skids briefly through each edge change.
+
+**Reference run.** `saved/04_stage3_tighter` is the same recipe with `edge_cmd_heading_deg=40 edge_cmd_center_max_deg=10`,
+warm-started from this run. Switching at 40° gives 4–5 turns per 100 m and no overshoot; speed (mean 7.9 m/s) and edge
+angle (toe 43° / heel 38° mean) are the same, slip is ~3°. GIFs: `docs/demo/04_stage3_tighter_front.gif`, `_top.gif`.
