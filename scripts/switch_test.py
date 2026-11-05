@@ -64,7 +64,7 @@ with launch_simulation(sim_utils.SimulationCfg(), args):
     names = raw.robot.joint_names
     for j in ("abdomen_x", "abdomen_y", "abdomen_z", "left_hip_y", "right_hip_y", "left_knee", "right_knee",
               "right_shoulder_x", "right_shoulder_y", "right_shoulder_z"):
-        i = names.index(j)
+        i = names.index(j if j in names else f"{j}:0")  # knee_rotation renames the knee hinge
         print(f"[switch] limit {j:17s} stance {raw.stance_pos[0, i].item():+.2f}  "
               f"range [{raw.joint_lower[i].item():+.2f}, {raw.joint_upper[i].item():+.2f}] rad")
     heel_rad = raw.heel_rad.clone()
