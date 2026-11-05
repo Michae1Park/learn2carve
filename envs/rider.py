@@ -570,7 +570,7 @@ class RiderSpawnCfg(UsdFileCfg):
 def rider_cfg(stance: dict | None = None, world_pins: dict | None = None, solver_iterations: tuple[int, int] = (32, 4),
               binding_angles: tuple[float, float] | None = None, stance_width: float | None = None,
               **options) -> ArticulationCfg:
-    """ArticulationCfg for the rider. ``stance`` (from envs/assets/stance.yaml) sets the default joint positions.
+    """ArticulationCfg for the rider. ``stance`` (from envs/assets/stances/) sets the default joint positions.
 
     solver_iterations: PhysX (position, velocity) iterations. options: RiderSpawnCfg fields (thoracic, neck / spine
     gains). Joints the stance file doesn't list (e.g. the thorax) start at 0.

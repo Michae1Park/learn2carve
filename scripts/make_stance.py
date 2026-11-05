@@ -4,7 +4,7 @@
 
 The pelvis and the board are welded to the world and held at the poses we want. The binding
 constraints then pull the feet onto the board, the joint drives settle the legs, and the result is a joint
-configuration that closes both binding loops exactly. It's saved to envs/assets/stance.yaml:
+configuration that closes both binding loops exactly. It's saved to envs/assets/stances/stance_<front>_<back>[_<tag>].yaml:
   joint_pos      default joint targets
   pelvis_pos/quat  pelvis pose in the board frame (quat x, y, z, w)
 """
@@ -22,7 +22,7 @@ parser.add_argument("--hip_height", type=float, default=0.80, help="pelvis heigh
 parser.add_argument("--open_deg", type=float, default=20.0, help="pelvis rotation from facing the toe edge toward the nose")
 parser.add_argument("--seconds", type=float, default=6.0)
 parser.add_argument("--angles", type=float, nargs=2, default=None, metavar=("FRONT", "BACK"),
-                    help="binding angles [deg]; default config.yaml. Others write envs/assets/stance_<front>_<back>.yaml")
+                    help="binding angles [deg]; default config.yaml. Others write envs/assets/stances/stance_<front>_<back>.yaml")
 parser.add_argument("--knee", type=float, default=0.6, help="initial guess: knee flexion [rad]")
 parser.add_argument("--hip_y", type=float, default=-0.35, help="initial guess: hip pitch [rad], negative = flexed")
 parser.add_argument("--ankle_y", type=float, default=-0.25, help="initial guess: ankle pitch [rad]")

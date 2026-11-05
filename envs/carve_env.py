@@ -39,7 +39,7 @@ from . import config
 from .rider import rider_cfg, rider_scale
 from .snow import SnowParams, air_drag, board_wrench, snow_wrench
 
-STANCE_FILE = config.ROOT / "envs/assets/stance.yaml"  # legacy name; files are stance_<front>_<back>[_<tag>].yaml
+STANCE_DIR = config.ROOT / "envs/assets/stances"  # stance_<front>_<back>[_<tag>].yaml
 
 
 def stance_file(binding_angles: tuple[float, float] | None = None, tag: str = ""):
@@ -47,7 +47,7 @@ def stance_file(binding_angles: tuple[float, float] | None = None, tag: str = ""
     A tag (e.g. "squat4") picks a variant: stance_<front>_<back>_<tag>.yaml."""
     suffix = f"_{tag}" if tag else ""
     front, back = binding_angles if binding_angles is not None else config.load()["rider"]["binding_angles_deg"]
-    return STANCE_FILE.with_name(f"stance_{front:g}_{back:g}{suffix}.yaml")
+    return STANCE_DIR / f"stance_{front:g}_{back:g}{suffix}.yaml"
 
 
 KEY_BODIES = ["right_hand", "left_hand", "right_foot", "left_foot"]
