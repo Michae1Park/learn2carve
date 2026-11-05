@@ -109,6 +109,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rew_grab = 0.0  # per s: inside hand reaches toward the board (heel turn: right hand -> toe edge at the front foot;
     # toe turn: left hand -> heel edge at the back foot), exp(-(d / grab_sigma_m)²), while command and board are on that side
     grab_sigma_m = 0.25
+    grab_linear_m = 0.0  # > 0: reward = clip(1 - d / grab_linear_m) instead of the Gaussian
     rew_rise = 0.0  # per s, while the command crosses flat (|cmd| < 8°): × clip((pelvis height - 0.35 m) / 0.2 m), rise to change edges
     # stage 1 (carve controller): start every episode already in a balanced carve, board on edge θ with
     # sin θ = v² / (g cos(slope) · R_sc), heel or toe, and command that edge for the whole episode (no transitions)
@@ -399,7 +400,11 @@ class SnowboardEnv(CarveEnv):
         """exp(-(d/σ)²) of the inside hand to its grab point, gated by side; and that distance [m]."""
         d_heel, d_toe, heel_turn, toe_turn = self._grab_parts(theta)
         d = torch.where(heel_turn, d_heel, torch.where(toe_turn, d_toe, torch.zeros_like(d_heel)))
-        r = torch.exp(-(d / self.cfg.grab_sigma_m).square()) * (heel_turn | toe_turn).float()
+        if self.cfg.grab_linear_m > 0:  # same pull from far away: clip(1 - d / range)
+            r = (1.0 - d / self.cfg.grab_linear_m).clamp(0.0, 1.0)
+        else:
+            r = torch.exp(-(d / self.cfg.grab_sigma_m).square())
+        r = r * (heel_turn | toe_turn).float()
         self._track("grab_heel_active", heel_turn.float())
         self._track("grab_heel_dist_x_active_m", d_heel * heel_turn)
         self._track("grab_toe_active", toe_turn.float())
