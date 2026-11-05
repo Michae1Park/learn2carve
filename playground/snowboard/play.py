@@ -5,13 +5,9 @@
     scripts/py playground/snowboard/play.py <run> --livestream 2 --follow    # camera tracks the rider
     scripts/py playground/snowboard/play.py --no_policy --task sideslip      # stance held, zero actions
 
-Play is a series of short runs, each starting the same way (piste centre, straight down, mid-range speed command)
-and ending --run_length metres down (default 100 m; 25 m for the side slip). The rider then returns to the top.
---seconds is the total play time. One line is printed per run (env 0), and the longest run's track is saved to
-<run>/trail.png.
-
-The camera starts low on the snow at the bottom of the run, looking up at the start, then it is yours (orbit, pan,
-zoom). --cam_x moves it along the run; --follow tracks the rider instead.
+Play is a series of identical runs (piste centre, straight down, mid-range speed command), each --run_length
+metres long. One line is printed per run of env 0; the longest run's track goes to <run>/trail.png and its
+per-step state to <run>/ride.csv. The camera starts low at the bottom of the run, looking up; then it is yours.
 """
 
 import argparse
@@ -19,34 +15,36 @@ import math
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so this runs with plain python too
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from playground.common import ROOT, add_suppress_arg, load_policy, make_env, parse_overrides
+from playground.common import (DEFAULT_CHECKPOINT, LOG_ROOT, add_suppress_arg, load_policy, make_env,
+                               parse_overrides)
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
 HERE = Path(__file__).resolve().parent
+TASKS = ["sideslip", "skid", "carve"]
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument("run", type=Path, nargs="?", help="run directory from train.py")
-parser.add_argument("--checkpoint", default="best_agent.pt", help="file in <run>/checkpoints/")
+parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT, help="file in <run>/checkpoints/")
 parser.add_argument("--no_policy", action="store_true", help="hold the stance (zero actions) instead of a policy")
-parser.add_argument("--task", choices=["sideslip", "skid", "carve"], default=None, help="default: the run's task")
+parser.add_argument("--task", choices=TASKS, default=None, help="default: the run's task")
 parser.add_argument("--seconds", type=float, default=60.0, help="total play time")
-parser.add_argument("--run_length", type=float, default=None, help="one run [m]; default: two S's (2 × turn length)")
+parser.add_argument("--run_length", type=float, default=None, help="one run [m]; default 100 (side slip 25)")
 parser.add_argument("--cam_x", type=float, default=None,
                     help="camera distance down the run from the start [m]; default: just past where a run ends")
-parser.add_argument("--focal", type=float, default=35.0, help="camera focal length [mm] (Kit's default is ~18)")
+parser.add_argument("--focal", type=float, default=35.0, help="camera focal length [mm]")
 parser.add_argument("--num_envs", type=int, default=1)
 parser.add_argument("--follow", action="store_true", help="camera tracks the rider (default: free camera)")
 parser.add_argument("--record", type=Path, default=None, metavar="DIR",
-                    help="film one run with two follow cameras (front, top) -> DIR/front.gif, DIR/top.gif; needs --enable_cameras")
+                    help="film one run with two follow cameras -> DIR/front.gif, DIR/top.gif; needs --enable_cameras")
 parser.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE", help="env cfg overrides on top of the run's")
 add_suppress_arg(parser)
 add_launcher_args(parser)
 args = parser.parse_args()
 if args.record:
-    args.enable_cameras = True  # the launcher only turns RTX cameras on for sensors it finds in a cfg
+    args.enable_cameras = True
 if not args.no_policy and args.run is None:
     parser.error("give a run directory, or --no_policy")
 
@@ -55,9 +53,15 @@ import yaml
 
 import isaaclab.sim as sim_utils
 
+RIDE_COLUMNS = ("x", "y", "speed", "slip_deg", "edge_deg", "cmd_deg", "torso_tilt_deg", "pelvis_h")
+
+
+def env0(tensor: torch.Tensor) -> float:
+    return tensor[0].item()
+
 
 class RunStats:
-    """Averages over one run of env 0, printed as one line. Turns come from the env's own counter (linked turns)."""
+    """Averages over one run of env 0, printed as one line."""
 
     HEADER = "run  end    seconds  speed (cmd)  |edge|°  slip_err°  |heading|°  max|y|_m  turns  m/turn"
 
@@ -68,7 +72,7 @@ class RunStats:
         self.x0 = self.x = 0.0
         self.turns = 0
         self.v_cmd = 0.0
-        self.rows = []  # per step: x, y, speed, slip°, edge° (saved as ride.csv for the longest run)
+        self.rows = []
 
     def add(self, env):
         x, y = env.position()[0].tolist()
@@ -76,23 +80,19 @@ class RunStats:
             self.x0 = x
         self.steps += 1
         self.x = x
-        self.turns = int(env.turn_count[0].item())
-        self.v_cmd = env.v_cmd[0].item()
-        self.sums["speed"] += env.board_speed()[0].item()
-        self.sums["edge"] += abs(math.degrees(env.snow_info["edge_angle"][0].item()))
-        self.sums["slip_err"] += abs(math.degrees(env.slip_error()[0].item()))
-        self.sums["heading"] += abs(math.degrees(env.path_heading()[0].item()))
+        self.turns = int(env0(env.turn_count))
+        self.v_cmd = env0(env.v_cmd)
+        speed = env0(env.board_speed())
+        edge_deg = math.degrees(env0(env.edge_angle()))
+        self.sums["speed"] += speed
+        self.sums["edge"] += abs(edge_deg)
+        self.sums["slip_err"] += abs(math.degrees(env0(env.slip_error())))
+        self.sums["heading"] += abs(math.degrees(env0(env.path_heading())))
         self.max_y = max(self.max_y, abs(y))
-        self.rows.append((x, y, env.board_speed()[0].item(), math.degrees(env.slip_angle()[0].item()),
-                          math.degrees(env.snow_info["edge_angle"][0].item()),
-                          math.degrees(env.edge_command()[0].item()) if env.cfg.edge_cmd else 0.0,
-                          self._tilt(env), env.pelvis_height()[0].item()))
-
-    @staticmethod
-    def _tilt(env) -> float:
-        from isaaclab.utils.math import quat_apply
-        up = quat_apply(env.body_quat(env.torso_id), env.up.expand(env.num_envs, 3))[0]  # torso up vs world up
-        return math.degrees(math.acos(max(-1.0, min(1.0, float((up * env.up).sum())))))
+        command_deg = math.degrees(env0(env.edge_command())) if env.cfg.edge_cmd else 0.0
+        tilt_deg = math.degrees(env0(env.torso_incline()))
+        self.rows.append((x, y, speed, math.degrees(env0(env.slip_angle())), edge_deg, command_deg, tilt_deg,
+                          env0(env.pelvis_height())))
 
     def line(self, number: int, end: str, step_dt: float) -> str:
         mean = {k: v / max(self.steps, 1) for k, v in self.sums.items()}
@@ -105,8 +105,8 @@ class RunStats:
 def main():
     run = yaml.safe_load((args.run / "run.yaml").read_text()) if args.run else {"task": "sideslip", "overrides": {}}
     task = args.task or run["task"]
-    out = args.run / "trail.png" if args.run else ROOT / f"logs/playground/snowboard/no_policy_{task}_trail.png"
-    out.parent.mkdir(parents=True, exist_ok=True)
+    trail_png = args.run / "trail.png" if args.run else LOG_ROOT / f"no_policy_{task}_trail.png"
+    trail_png.parent.mkdir(parents=True, exist_ok=True)
 
     sim_cfg = sim_utils.SimulationCfg()
     with launch_simulation(sim_cfg, args):
@@ -118,8 +118,7 @@ def main():
         env_cfg = SnowboardEnvCfg(task=task)
         if args.record:
             Recorder.add_cameras(env_cfg)
-        raw_env = make_env(SnowboardEnv, env_cfg, overrides, args.num_envs, sim_cfg,
-                           args.suppress_warnings)
+        raw_env = make_env(SnowboardEnv, env_cfg, overrides, args.num_envs, sim_cfg, args.suppress_warnings)
         if args.no_policy:
             env, agent = raw_env, None
         else:
@@ -130,28 +129,28 @@ def main():
         trail = SnowTrail(board["length"], board["waist_width"], raw_env.q_slope)
 
         print(f"\n[play] task={task}  {'no policy' if args.no_policy else args.run.name}  run {run_length:.0f} m, "
-              f"speed command {raw_env.v_cmd[0].item():.1f} m/s, fence ±{raw_env.cfg.fence_half_width:.0f} m")
+              f"speed command {env0(raw_env.v_cmd):.1f} m/s, fence ±{raw_env.cfg.fence_half_width:.0f} m")
         print(f"[play] {RunStats.HEADER}")
-        recorder = Recorder(raw_env, trail) if args.record else None
-        longest_secs, longest_marks, rows = ride(env, raw_env, agent, trail, recorder)
-        csv = out.with_name(out.stem.replace("trail", "ride") + ".csv")  # next to trail.png
-        csv.write_text("x,y,speed,slip_deg,edge_deg,cmd_deg,torso_tilt_deg,pelvis_h\n" + "".join(",".join(f"{v:.3f}" for v in r) + "\n" for r in rows))
+        recorder = Recorder(raw_env) if args.record else None
+        longest_seconds, longest_marks, rows = ride(env, raw_env, agent, trail, recorder)
+        write_ride_csv(trail_png.with_name(trail_png.stem.replace("trail", "ride") + ".csv"), rows)
         if recorder:
             recorder.save(args.record)
 
         trail.marks = longest_marks
-        trail.save_png(out, f"{task}: {longest_secs:.1f} s at {raw_env.v_cmd[0].item():.1f} m/s commanded",
+        trail.save_png(trail_png, f"{task}: {longest_seconds:.1f} s at {env0(raw_env.v_cmd):.1f} m/s commanded",
                        fence=raw_env.cfg.fence_half_width, x_end=run_length)
-        print(f"[play] track of the longest episode ({longest_secs:.1f} s) -> {out}")
+        print(f"[play] track of the longest episode ({longest_seconds:.1f} s) -> {trail_png}")
         env.close()
 
 
-def play_overrides(run_overrides: dict, defaults) -> tuple[dict, float]:
-    """Env overrides for short, repeatable runs. Returns (overrides, run length).
+def write_ride_csv(path: Path, rows: list):
+    lines = [",".join(RIDE_COLUMNS)] + [",".join(f"{v:.3f}" for v in row) for row in rows]
+    path.write_text("\n".join(lines) + "\n")
 
-    Training's cfg is the base; --set wins over everything. Unless set, every run starts the same way: mid-range
-    speed command, on the piste centre, pointing straight down the fall line.
-    """
+
+def play_overrides(run_overrides: dict, defaults) -> tuple[dict, float]:
+    """Training's overrides, made repeatable for play; --set wins over everything. Returns (overrides, run length)."""
     user = parse_overrides(args.set)
     overrides = run_overrides | user
 
@@ -163,21 +162,21 @@ def play_overrides(run_overrides: dict, defaults) -> tuple[dict, float]:
         overrides["speed_cmd"] = (middle("speed_cmd"),) * 2
     if "start_heading_deg" not in user:
         overrides["start_heading_deg"] = 0.0
-    overrides["guide_steps"] = 0  # the guide S is a training aid only: play rides without it
-    if "edge_cmd_level_init" not in user:  # ride the full command training ended on, not the curriculum's start
+    if "edge_cmd_level_init" not in user:
         overrides["edge_cmd_level_init"], overrides["edge_cmd_level_fixed"] = 1.0, True
-    overrides["rsi_frac"] = 0.0  # recorded-state starts are a training aid: every play run starts at the top, centred
+    overrides["guide_steps"] = 0
+    overrides["rsi_frac"] = 0.0
 
     run_length = args.run_length or (25.0 if defaults.task == "sideslip" else 100.0)
     overrides["run_length"] = run_length
-    overrides["episode_length_s"] = 60.0  # runs end by distance; this only catches a rider who stops
+    overrides["episode_length_s"] = 60.0  # only catches a rider who stops
     if not args.follow:
         overrides["viewer"] = free_view_cfg(overrides.get("slope_deg"), args.cam_x or run_length + 10.0)
     return overrides, run_length
 
 
 def ride(env, raw_env, agent, trail, recorder=None) -> tuple[float, list, list]:
-    """Play for --seconds, one printed line per run. Returns the longest run's (seconds, trail marks, stat rows)."""
+    """Returns the longest run's (seconds, trail marks, ride rows)."""
     steps = int(args.seconds / raw_env.step_dt)
     obs, _ = env.reset()
     stats, runs = RunStats(), 0
@@ -193,9 +192,9 @@ def ride(env, raw_env, agent, trail, recorder=None) -> tuple[float, list, list]:
         terminated, truncated = bool(terminated.view(-1)[0]), bool(truncated.view(-1)[0])
         done = terminated or truncated
 
-        if not done:  # on a done step the env has already reset to the start
+        if not done:  # a done step has already reset env 0 to the start
             stats.add(raw_env)
-            trail.add(raw_env.body_pos(raw_env.board_id)[0], raw_env.slip_angle()[0].item())
+            trail.add(raw_env.body_pos(raw_env.board_id)[0], env0(raw_env.slip_angle()))
             if recorder:
                 recorder.capture()
         if done or t == steps - 1:
@@ -214,51 +213,54 @@ def ride(env, raw_env, agent, trail, recorder=None) -> tuple[float, list, list]:
 
 
 class Recorder:
-    """Two cameras that follow env 0's rider: "front" faces the rider's chest (frontside) from 7 m, "top" looks down
-    on the board from 48 m up so a full S of the track behind it shows. Frames are kept on the CPU, written as GIFs at the end."""
+    """Follow cameras on env 0: "front" faces the rider's chest from 7 m, "top" looks down from 48 m so a full S of
+    the track shows. Frames stay on the CPU and are written as GIFs at the end."""
 
-    SIZE = (900, 600)  # w, h
-
-    VIEWS = {"front": 30.0, "top": 18.0}  # name: focal length [mm]
+    SIZE = (900, 600)
+    FOCAL_MM = {"front": 30.0, "top": 18.0}
+    FACING_SMOOTHING = 0.08
 
     @classmethod
     def add_cameras(cls, env_cfg):
-        """Cameras go in the scene cfg so they are built with the env (built later, the rider never renders)."""
+        """Cameras must be in the scene cfg: added after the env is built, the rider never renders."""
         from isaaclab.sensors import CameraCfg
 
-        for name, focal in cls.VIEWS.items():
+        for name, focal in cls.FOCAL_MM.items():
             setattr(env_cfg.scene, f"record_{name}", CameraCfg(
                 prim_path=f"{{ENV_REGEX_NS}}/Record_{name}", width=cls.SIZE[0], height=cls.SIZE[1],
                 data_types=["rgb"], update_period=0.0,
                 spawn=sim_utils.PinholeCameraCfg(focal_length=focal, clipping_range=(0.1, 2000.0))))
 
-    def __init__(self, env, trail):
-        self.env, self.trail = env, trail
-        self.frames = {name: [] for name in self.VIEWS}
-        self.cams = {name: env.scene[f"record_{name}"] for name in self.VIEWS}
+    def __init__(self, env):
+        self.env = env
+        self.frames = {name: [] for name in self.FOCAL_MM}
+        self.cams = {name: env.scene[f"record_{name}"] for name in self.FOCAL_MM}
         self.facing = None
+
+    def _smoothed_facing(self) -> torch.Tensor:
+        from isaaclab.utils.math import quat_apply
+
+        env = self.env
+        chest = quat_apply(env.body_quat(env.pelvis_id)[0], torch.tensor([1.0, 0.0, 0.0], device=env.device))
+        chest[2] = 0.0
+        chest = chest / chest.norm().clamp(min=1e-6)
+        a = self.FACING_SMOOTHING
+        self.facing = chest if self.facing is None else (1 - a) * self.facing + a * chest
+        return self.facing / self.facing.norm().clamp(min=1e-6)
 
     def capture(self):
         env = self.env
         pelvis = env.body_pos(env.pelvis_id)[0]
-        # chest direction: pelvis local +x, flattened onto the snow and smoothed so turns don't shake the camera
-        from isaaclab.utils.math import quat_apply
-
-        fwd = quat_apply(env.body_quat(env.pelvis_id)[0], torch.tensor([1.0, 0.0, 0.0], device=env.device))
-        fwd[2] = 0.0
-        fwd = fwd / fwd.norm().clamp(min=1e-6)
-        self.facing = fwd if self.facing is None else 0.92 * self.facing + 0.08 * fwd
-        f = self.facing / self.facing.norm().clamp(min=1e-6)
+        facing = self._smoothed_facing()
         up = torch.tensor([0.0, 0.0, 1.0], device=env.device)
-        down = torch.tensor([1.0, 0.0, 0.0], device=env.device)  # downhill in the slope frame
+        downhill = torch.tensor([1.0, 0.0, 0.0], device=env.device)
         views = {
-            "front": (pelvis + 7.0 * f + 1.0 * up + 1.5 * down, pelvis),
-            # eye a little downhill of its target: image up = uphill, so the track trails up the frame behind the rider
-            "top": (pelvis + 6.0 * down + 48.0 * up, pelvis - 14.0 * down - 0.8 * up),
+            "front": (pelvis + 7.0 * facing + 1.0 * up + 1.5 * downhill, pelvis),
+            # eye downhill of its target: uphill is image-up, so the track trails up the frame
+            "top": (pelvis + 6.0 * downhill + 48.0 * up, pelvis - 14.0 * downhill - 0.8 * up),
         }
         for name, (eye, target) in views.items():
-            cam = self.cams[name]
-            cam.set_world_poses_from_view(env.to_world(eye)[None], env.to_world(target)[None])
+            self.cams[name].set_world_poses_from_view(env.to_world(eye)[None], env.to_world(target)[None])
         env.sim.render()
         for name, cam in self.cams.items():
             self.frames[name].append(cam.data.output["rgb"][0, ..., :3].cpu().numpy())
@@ -269,29 +271,28 @@ class Recorder:
         out_dir.mkdir(parents=True, exist_ok=True)
         for name, frames in self.frames.items():
             path = out_dir / f"{name}.gif"
-            imageio.mimsave(path, frames[::2], duration=2 * self.env.step_dt * 1000, loop=0)  # 15 fps, real time
-            print(f"[play] {len(frames[::2])} frames -> {path}")
+            every_other = frames[::2]  # 15 fps, real time
+            imageio.mimsave(path, every_other, duration=2 * self.env.step_dt * 1000, loop=0)
+            print(f"[play] {len(every_other)} frames -> {path}")
 
 
 def free_view_cfg(slope_deg: float | None, cam_x: float):
-    """Camera placed once, low on the snow cam_x down the run, looking back up at env 0's start. Kit leaves it alone
-    after that (origin_type "env"), so the mouse controls it. "asset_root" (--follow) re-aims it every frame."""
+    """Placed once, 0.6 m above the snow cam_x down the run, looking back at env 0's start; the mouse owns it after."""
     from isaaclab.envs import ViewerCfg
 
     from envs import config
     from envs.mountain import slope_to_world
 
-    a = slope_deg if slope_deg is not None else config.load()["slope"]["angle_deg"]
-    # 0.6 m up: on a plane the horizon sits at eye height, so the 1.6 m rider rises above it into the sky
-    return ViewerCfg(eye=slope_to_world(a, cam_x, 3.0, 0.6), lookat=slope_to_world(a, 0.0, 0.0, 1.0), origin_type="env")
+    angle = slope_deg if slope_deg is not None else config.load()["slope"]["angle_deg"]
+    return ViewerCfg(eye=slope_to_world(angle, cam_x, 3.0, 0.6), lookat=slope_to_world(angle, 0.0, 0.0, 1.0),
+                     origin_type="env")
 
 
 def set_focal_length(cam_prim_path: str, focal_mm: float):
-    """Longer lens than Kit's ~18 mm default: the rider fills more of the frame from the bottom of the run."""
     from isaaclab.sim.utils.stage import get_current_stage
 
     prim = get_current_stage().GetPrimAtPath(cam_prim_path)
-    if prim.IsValid():  # only exists with a viewer (e.g. --livestream)
+    if prim.IsValid():  # only with a viewer
         prim.GetAttribute("focalLength").Set(focal_mm)
 
 

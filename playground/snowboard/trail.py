@@ -1,50 +1,54 @@
-"""The track the board leaves on the snow: drawn live in the viewport and saved as a top-down picture.
+"""The board's track on the snow, drawn live in the viewport and saved as a top-down picture.
 
-Each policy step adds one flat strip under the board. Its width is the snow the board sweeps sideways:
-
-    width = L · |sin β| + w · |cos β|        L = board length, w = waist width, β = slip angle
-
-A carve (β ≈ 0) leaves a line as wide as the board; a skid smears a band up to the board's length (side slip).
-
-Positions come in the slope frame (x downhill along the snow, y across); ``q_slope`` places the strips in the world.
+Each step adds one strip as wide as the snow the board sweeps: L · |sin β| + w · |cos β| (β = slip angle).
+Positions are in the slope frame; ``q_slope`` places the strips in the world.
 """
 
 from __future__ import annotations
 
 import math
+from typing import NamedTuple
 
 import torch
+
+TRACK_COLOR = (0.25, 0.45, 0.85)
+STRIP_OVERLAP = 1.05
+STRIP_LIFT = 0.003  # m above the snow
+
+
+class Mark(NamedTuple):
+    x: float
+    y: float
+    heading: float
+    length: float
+    width: float
 
 
 class SnowTrail:
     def __init__(self, board_length: float, board_width: float, q_slope: torch.Tensor, max_marks: int = 4000):
-        self.L, self.w = board_length, board_width
-        self.max_marks = max_marks
-        self.q_slope = q_slope.detach().cpu()  # slope frame → world, (x, y, z, w)
-        self.marks: list[tuple[float, float, float, float, float]] = []  # x, y, heading, step length, width
         import isaaclab.sim as sim_utils
         from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 
-        # headless, visualize() is a no-op, so this costs nothing without a viewer
-        self.markers = VisualizationMarkers(
+        self.board_length, self.board_width = board_length, board_width
+        self.max_marks = max_marks
+        self.q_slope = q_slope.detach().cpu()
+        self.marks: list[Mark] = []
+        self.last_xy: tuple[float, float] | None = None
+        self.markers = VisualizationMarkers(  # a no-op headless
             VisualizationMarkersCfg(
                 prim_path="/Visuals/SnowTrail",
                 markers={
                     "track": sim_utils.CuboidCfg(
-                        size=(1.0, 1.0, 0.002),
-                        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.25, 0.45, 0.85)),
+                        size=(1.0, 1.0, 0.002), visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=TRACK_COLOR)
                     )
                 },
             )
         )
-        self.last_xy: tuple[float, float] | None = None
 
     def reset(self):
-        """Start a new trail segment (after a fall the rider jumps back to the start)."""
         self.last_xy = None
 
     def add(self, board_pos: torch.Tensor, slip_angle: float):
-        """board_pos: (3,) slope-frame position of one env's board."""
         x, y = board_pos[0].item(), board_pos[1].item()
         if self.last_xy is None:
             self.last_xy = (x, y)
@@ -53,30 +57,26 @@ class SnowTrail:
         step = math.hypot(x - px, y - py)
         if step < 1e-3:
             return
-        heading = math.atan2(y - py, x - px)
-        width = self.L * abs(math.sin(slip_angle)) + self.w * abs(math.cos(slip_angle))
-        self.marks.append(((x + px) / 2, (y + py) / 2, heading, step, width))
+        width = self.board_length * abs(math.sin(slip_angle)) + self.board_width * abs(math.cos(slip_angle))
+        self.marks.append(Mark((x + px) / 2, (y + py) / 2, math.atan2(y - py, x - px), step, width))
         self.marks = self.marks[-self.max_marks:]
         self.last_xy = (x, y)
         self._draw()
 
     def _draw(self):
-        if not self.marks:
-            return
         from isaaclab.utils.math import quat_apply, quat_mul
 
         m = torch.tensor(self.marks)
-        pos = torch.stack([m[:, 0], m[:, 1], torch.full_like(m[:, 0], 0.003)], dim=-1)
-        quat = torch.zeros(len(m), 4)  # (x, y, z, w), yaw on the snow
-        quat[:, 2], quat[:, 3] = torch.sin(m[:, 2] / 2), torch.cos(m[:, 2] / 2)
+        x, y, heading, length, width = m.unbind(-1)
+        pos = torch.stack([x, y, torch.full_like(x, STRIP_LIFT)], dim=-1)
+        yaw = torch.zeros(len(m), 4)
+        yaw[:, 2], yaw[:, 3] = torch.sin(heading / 2), torch.cos(heading / 2)
         q = self.q_slope.expand(len(m), 4)
-        pos, quat = quat_apply(q, pos), quat_mul(q, quat)
-        scale = torch.stack([m[:, 3] * 1.05, m[:, 4], torch.ones_like(m[:, 0])], dim=-1)
-        self.markers.visualize(translations=pos, orientations=quat, scales=scale)
+        scale = torch.stack([length * STRIP_OVERLAP, width, torch.ones_like(x)], dim=-1)
+        self.markers.visualize(translations=quat_apply(q, pos), orientations=quat_mul(q, yaw), scales=scale)
 
     def save_png(self, path, title: str = "", line=None, fence: float | None = None, x_end: float | None = None):
-        """Top-down view, downhill pointing down the page. line(x) -> y_ref draws the target (dashed), fence the
-        fences at ±fence (orange)."""
+        """Downhill points down the page. line(x) → y draws a dashed target; fence draws the fences at ±fence."""
         import matplotlib
 
         matplotlib.use("Agg")
@@ -86,15 +86,16 @@ class SnowTrail:
 
         if not self.marks:
             return
-        xs = [m[0] for m in self.marks]
-        ys = [m[1] for m in self.marks]
+        xs = [m.x for m in self.marks]
+        ys = [m.y for m in self.marks]
         fig, ax = plt.subplots(figsize=(5, 9))
         ax.set_facecolor("#f4f7fb")
-        for x, y, heading, step, width in self.marks:
-            # page coordinates: right = +y (across the slope), down = +x (downhill)
-            rect = Rectangle((-step / 2, -width / 2), step * 1.05, width, color="#3b6fd8", alpha=0.6, lw=0)
-            angle = math.degrees(math.atan2(-math.cos(heading), math.sin(heading)))
-            rect.set_transform(Affine2D().rotate_deg(angle).translate(y, -x) + ax.transData)
+        for m in self.marks:
+            # page: right = +y (across), down = +x (downhill)
+            rect = Rectangle((-m.length / 2, -m.width / 2), m.length * STRIP_OVERLAP, m.width, color="#3b6fd8",
+                             alpha=0.6, lw=0)
+            angle = math.degrees(math.atan2(-math.cos(m.heading), math.sin(m.heading)))
+            rect.set_transform(Affine2D().rotate_deg(angle).translate(m.y, -m.x) + ax.transData)
             ax.add_patch(rect)
         x_hi = max(max(xs), x_end or 0.0)
         if line is not None:

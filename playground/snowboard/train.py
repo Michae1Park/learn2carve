@@ -4,31 +4,28 @@
     scripts/py playground/snowboard/train.py --task skid --set slope_deg=10
     scripts/py playground/snowboard/train.py --task carve --init_from logs/playground/snowboard/<run>   # warm start
 
-Add --livestream 2 to watch env 0 in the Isaac Sim WebRTC client while it trains.
-Runs land in logs/playground/snowboard/<time>_ppo_<task>/ (TensorBoard events + checkpoints/).
---set overrides any SnowboardEnvCfg field (reward weights, targets, slope_deg, ...); see env.py.
-Watch Episode_Snow/* (heading / slip errors in degrees, seconds survived) and Episode_Termination/fell.
+--livestream 2 streams env 0 to the Isaac Sim WebRTC client. --set overrides any SnowboardEnvCfg field.
+Runs land in logs/playground/snowboard/<time>_ppo_<task>/.
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so this runs with plain python too
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from playground.common import ROOT, add_train_args, make_env, new_run, train
+from playground.common import LOG_ROOT, add_train_args, make_env, new_run, train
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
 HERE = Path(__file__).resolve().parent
-LOG_ROOT = ROOT / "logs/playground/snowboard"
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument("--task", choices=["sideslip", "skid", "carve"], default="sideslip")
 add_train_args(parser)
 add_launcher_args(parser)
 args = parser.parse_args()
-args.headless = not (getattr(args, "livestream", None) or 0) > 0  # --livestream 2: stream the viewport (WebRTC)
+args.headless = not (getattr(args, "livestream", None) or 0) > 0
 if args.algo != "ppo":
     parser.error("only ppo is set up for the snowboarder (playground/snowboard/ppo.yaml)")
 

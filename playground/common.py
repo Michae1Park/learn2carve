@@ -1,8 +1,4 @@
-"""Helpers shared by the snowboard train/play scripts and scripts/ (run folders, --set, train loop, policy loading).
-
-Safe to import before Isaac Sim launches (only `train` / `load_policy` / `make_env` touch Isaac, and they import
-it lazily, so call them inside ``launch_simulation``).
-"""
+"""Run folders, --set overrides, the train loop and policy loading. Importable before Isaac Sim launches."""
 
 import sys
 from datetime import datetime
@@ -11,9 +7,10 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-CFG_DIR = ROOT / "playground/snowboard"  # ppo.yaml / sac.yaml
+CFG_DIR = ROOT / "playground/snowboard"
 LOG_ROOT = ROOT / "logs/playground/snowboard"
-sys.path.insert(0, str(ROOT))  # so `playground.*` imports without scripts/py
+DEFAULT_CHECKPOINT = "best_agent.pt"
+sys.path.insert(0, str(ROOT))
 
 
 def add_train_args(parser, default_timesteps: int | None = None):
@@ -31,7 +28,7 @@ def add_train_args(parser, default_timesteps: int | None = None):
 
 def add_play_args(parser):
     parser.add_argument("run", type=Path, help="run directory from train.py")
-    parser.add_argument("--checkpoint", default="best_agent.pt", help="file in <run>/checkpoints/")
+    parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT, help="file in <run>/checkpoints/")
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--seconds", type=float, default=10.0)
     add_suppress_arg(parser)
@@ -57,9 +54,7 @@ def load_agent_cfg(algo: str, cfg_dir: Path = CFG_DIR) -> dict:
 
 
 def new_run(args, task: str, cfg_dir: Path = CFG_DIR, log_root: Path = LOG_ROOT, **extra) -> tuple[Path, dict, dict]:
-    """Create <log_root>/<time>_<algo>_<task>/ with a run.yaml. Returns (run_dir, run, agent_cfg).
-
-    """
+    """Create <log_root>/<time>_<algo>_<task>/ with a run.yaml. Returns (run_dir, run, agent_cfg)."""
     agent_cfg = load_agent_cfg(args.algo, cfg_dir)
     run_dir = log_root / f"{datetime.now():%Y-%m-%d_%H-%M-%S}_{args.algo}_{task}"
     run_dir.mkdir(parents=True)
@@ -76,11 +71,7 @@ def new_run(args, task: str, cfg_dir: Path = CFG_DIR, log_root: Path = LOG_ROOT,
 
 
 def make_env(env_cls, cfg, overrides: dict, num_envs: int, launched_sim_cfg, suppress_warnings: str = "true"):
-    """Build an env from its cfg. Call inside ``launch_simulation(launched_sim_cfg, args)``.
-
-    launch_simulation writes the run's device and visualizers (e.g. the Kit viewport that --livestream needs)
-    into the SimulationCfg it was given; copy them, or the env never renders.
-    """
+    """Call inside ``launch_simulation(launched_sim_cfg, args)``, which fills in the device and visualizers."""
     for key, value in overrides.items():
         if not hasattr(cfg, key):
             raise KeyError(f"{type(cfg).__name__} has no field {key!r}")
@@ -94,15 +85,14 @@ def make_env(env_cls, cfg, overrides: dict, num_envs: int, launched_sim_cfg, sup
 
 
 def quiet_physx_tensors():
-    """Hide the plugin's warnings (errors still show). Building the env makes it scan every prim on the stage and
-    warn "Failed to find rigid body at '/World/...'" for each non-body: thousands of harmless lines."""
+    """Hides thousands of harmless "Failed to find rigid body" warnings; errors still show."""
     import carb
 
     carb.settings.get_settings().set("/log/channels/omni.physx.tensors.plugin", "error")
 
 
 def train(raw_env, agent_cfg: dict, run_dir: Path, run: dict, seed: int, init_from: Path | None = None):
-    """Train with skrl until `run["timesteps"]` (Ctrl+C stops early) and save a final checkpoint."""
+    """Ctrl+C stops early; a final checkpoint is saved either way."""
     from isaaclab_rl.skrl import SkrlVecEnvWrapper
     from skrl.utils import set_seed
     from skrl.utils.runner.torch import Runner
@@ -117,15 +107,7 @@ def train(raw_env, agent_cfg: dict, run_dir: Path, run: dict, seed: int, init_fr
     env = SkrlVecEnvWrapper(raw_env)
     runner = Runner(env, agent_cfg)
     if init_from is not None:
-        ckpt = init_from if init_from.suffix == ".pt" else init_from / "checkpoints" / "best_agent.pt"
-        runner.agent.load(str(ckpt))
-        print(f"[train] warm start from {ckpt}")
-        # the saved std is whatever the entropy bonus inflated it to; explore from the usual start again
-        log_std = agent_cfg["models"]["policy"].get("initial_log_std", -1.0)
-        for name, param in runner.agent.policy.named_parameters():
-            if "log_std" in name:
-                param.data.fill_(log_std)
-        print(f"[train] exploration std reset to e^{log_std:g}")
+        warm_start(runner.agent, init_from, agent_cfg["models"]["policy"].get("initial_log_std", -1.0))
     print(f"[train] {run['algo']} / {run['task']} / {run['num_envs']} envs / {timesteps} steps -> {run_dir}")
     try:
         runner.run()
@@ -135,8 +117,19 @@ def train(raw_env, agent_cfg: dict, run_dir: Path, run: dict, seed: int, init_fr
     env.close()
 
 
+def warm_start(agent, init_from: Path, log_std: float):
+    """Load a checkpoint, then reset the exploration std the entropy bonus may have inflated."""
+    checkpoint = init_from if init_from.suffix == ".pt" else init_from / "checkpoints" / DEFAULT_CHECKPOINT
+    agent.load(str(checkpoint))
+    print(f"[train] warm start from {checkpoint}")
+    for name, param in agent.policy.named_parameters():
+        if "log_std" in name:
+            param.data.fill_(log_std)
+    print(f"[train] exploration std reset to e^{log_std:g}")
+
+
 def load_policy(raw_env, run: dict, run_dir: Path, checkpoint: str, cfg_dir: Path = CFG_DIR):
-    """Wrap the env for skrl and load a trained agent in eval mode. Returns (env, agent)."""
+    """Returns (skrl-wrapped env, agent in eval mode)."""
     from isaaclab_rl.skrl import SkrlVecEnvWrapper
     from skrl.utils.runner.torch import Runner
 
@@ -151,8 +144,7 @@ def load_policy(raw_env, run: dict, run_dir: Path, checkpoint: str, cfg_dir: Pat
 
 
 def close_view_cfg():
-    """Camera for play: starts close on env 0. "env" places it once and leaves orbit/zoom to you; "asset_root"
-    would re-aim it every frame and fight the mouse."""
+    """Placed once near env 0 ("asset_root" would re-aim every frame and fight the mouse)."""
     from isaaclab.envs import ViewerCfg
 
     return ViewerCfg(eye=(2.5, 2.5, 1.2), lookat=(1.0, 0.0, 0.3), origin_type="env")
