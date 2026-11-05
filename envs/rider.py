@@ -397,6 +397,16 @@ def _widen_ankles(stage, root: str, cfg: RiderSpawnCfg) -> None:
             limit.GetHighAttr().Set(half)
 
 
+def _widen_torso_twist(stage, root: str, cfg: RiderSpawnCfg) -> None:
+    """abdomen_z limits ± cfg.torso_twist_deg (stock ±50°). The posi-posi stance already twists +48° toward the nose,
+    leaving no room to turn the chest past the nose for the heel-side carve."""
+    from pxr import UsdPhysics
+
+    limit = UsdPhysics.LimitAPI(stage.GetPrimAtPath(f"{root}/joints/torso"), "rotZ")
+    limit.GetLowAttr().Set(-cfg.torso_twist_deg)
+    limit.GetHighAttr().Set(cfg.torso_twist_deg)
+
+
 def _fit_boots(stage, root: str, cfg: RiderSpawnCfg) -> None:
     from pxr import UsdPhysics
 
@@ -468,6 +478,8 @@ def spawn_rider(prim_path: str, cfg: RiderSpawnCfg, translation=None, orientatio
     _tune_drives(stage, prim_path, cfg)
     if cfg.ankle_range_deg:
         _widen_ankles(stage, prim_path, cfg)
+    if cfg.torso_twist_deg:
+        _widen_torso_twist(stage, prim_path, cfg)
     if cfg.stiff_boots:
         _fit_boots(stage, prim_path, cfg)
     _author_board(stage, prim_path, cfg)
@@ -498,6 +510,7 @@ class RiderSpawnCfg(UsdFileCfg):
     stiff_boots: bool = False  # snowboard boots: ankles held near their stance angle (BOOT_RANGE_DEG), 3× stiffer
     boot_center_deg: dict = {}  # {ankle joint: stance angle [deg]}; filled by rider_cfg from the stance
     ankle_range_deg: dict = {}  # {"x" | "y" | "z": half range [deg]}: wider ankle limits about 0; {} = stock
+    torso_twist_deg: float = 0.0  # abdomen_z half range [deg]; 0 = stock (±50°)
     neck_stiffness_scale: float = 1.0  # neck PD gains × this
     spine_damping_scale: float = 1.0  # abdomen + thorax damping × this (anti-jerk)
 

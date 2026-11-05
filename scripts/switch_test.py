@@ -61,6 +61,12 @@ with launch_simulation(sim_utils.SimulationCfg(), args):
     raw = make_env(SnowboardEnv, SnowboardEnvCfg(task=run["task"]), ov, n, sim_utils.SimulationCfg(), "true")
     env, agent = load_policy(raw, run, args.run, args.checkpoint)
     dev = raw.device
+    names = raw.robot.joint_names
+    for j in ("abdomen_x", "abdomen_y", "abdomen_z", "left_hip_y", "right_hip_y", "left_knee", "right_knee",
+              "right_shoulder_x", "right_shoulder_y", "right_shoulder_z"):
+        i = names.index(j)
+        print(f"[switch] limit {j:17s} stance {raw.stance_pos[0, i].item():+.2f}  "
+              f"range [{raw.joint_lower[i].item():+.2f}, {raw.joint_upper[i].item():+.2f}] rad")
     heel_rad = raw.heel_rad.clone()
     raw.heel_rad.zero_()  # the hold phase rides as trained
     group = torch.arange(n, device=dev) // args.reps
