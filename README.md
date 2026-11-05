@@ -79,6 +79,9 @@ scripts/install.sh   # Isaac Sim 6.1 + Isaac Lab + skrl, into .venv-sim
 # Watch a trained rider carve
 scripts/py playground/snowboard/play.py saved/03_stage3_centred
 
+# ...with the live stream (Isaac Sim viewport)
+scripts/py playground/snowboard/play.py saved/03_stage3_centred --livestream 2 --follow
+
 # Train from scratch
 scripts/py playground/snowboard/train.py --task carve --set slope_deg=10
 ```
