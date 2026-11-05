@@ -164,6 +164,8 @@ def play_overrides(run_overrides: dict, defaults) -> tuple[dict, float]:
     if "start_heading_deg" not in user:
         overrides["start_heading_deg"] = 0.0
     overrides["guide_steps"] = 0  # the guide S is a training aid only: play rides without it
+    if "edge_cmd_level_init" not in user:  # ride the full command training ended on, not the curriculum's start
+        overrides["edge_cmd_level_init"], overrides["edge_cmd_level_fixed"] = 1.0, True
     overrides["rsi_frac"] = 0.0  # recorded-state starts are a training aid: every play run starts at the top, centred
 
     run_length = args.run_length or (25.0 if defaults.task == "sideslip" else 100.0)

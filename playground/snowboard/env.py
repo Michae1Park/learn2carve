@@ -122,6 +122,8 @@ class SnowboardEnvCfg(CarveEnvCfg):
     edge_cmd_period_s = (4.6, 4.0)  # one full S (two edges, a turn every ~2 s), level 0 -> 1; ±15 % per episode
     # "heading": hold one edge until the path heading reaches ±edge_cmd_heading_deg across the hill (a finished turn),
     # or edge_cmd_max_s passes; then ramp through flat to the other edge over edge_cmd_ramp_s. "timer": the sine above
+    edge_cmd_level_init = 0.0  # curriculum level at start (play.py: 1, the level training ends at)
+    edge_cmd_level_fixed = False  # True: no curriculum, the level stays at edge_cmd_level_init
     edge_cmd_mode = "timer"
     edge_cmd_heading_deg = 50.0
     edge_cmd_min_s = 1.0
@@ -213,7 +215,7 @@ class SnowboardEnv(CarveEnv):
         self.guide_level = 1.0  # adaptive fade, see guide_fade()
         self.cmd_period = torch.ones(n, device=dev)  # edge command: this episode's period [s] and phase
         self.cmd_phase = torch.zeros(n, device=dev)
-        self.cmd_level = 0.0
+        self.cmd_level = cfg.edge_cmd_level_init
         self.cmd_hold = torch.zeros(n, device=dev)  # edge_cmd_hold: the edge to hold this episode [rad]
         self.cmd_err_ema = 90.0
         self.guide_err_ema = 90.0  # deg, running mean of the guide heading error over all envs
@@ -321,6 +323,8 @@ class SnowboardEnv(CarveEnv):
         alive = ~self.reset_terminated
         if alive.any():
             self.cmd_err_ema = 0.99 * self.cmd_err_ema + 0.01 * err_deg[alive].mean().item()
+        if self.cfg.edge_cmd_level_fixed:
+            return
         step = 1.0 / self.cfg.edge_cmd_level_steps
         if self.cmd_err_ema < self.cfg.edge_cmd_level_up_deg:
             self.cmd_level = min(1.0, self.cmd_level + step)
