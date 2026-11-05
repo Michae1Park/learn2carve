@@ -150,6 +150,21 @@ Diagnostics:
 **Open.** Turns overshoot (the heading reaches 56–91° across the hill at the switch, aimed at 50–60°), and the board
 skids briefly through each edge change.
 
-**Reference run.** `saved/04_stage3_tighter` is the same recipe with `edge_cmd_heading_deg=40 edge_cmd_center_max_deg=10`,
-warm-started from this run. Switching at 40° gives 4–5 turns per 100 m and no overshoot; speed (mean 7.9 m/s) and edge
-angle (toe 43° / heel 38° mean) are the same, slip is ~3°. GIFs: `docs/demo/04_stage3_tighter_front.gif`, `_top.gif`.
+**Tightening the turns (reference run).** The overshoot is the heading switch firing late: the edge command only flips
+once $\psi$ passes the switch heading, and the board keeps swinging while the command ramps through flat. Switch
+earlier and the turn ends nearer the target. `saved/04_stage3_tighter` does this on top of the stage 3 script, warm-started
+from this run:
+
+```bash
+scripts/train_stage3_full_s.sh --init_from saved/03_stage3_centred --set edge_cmd_heading_deg=40 edge_cmd_center_max_deg=10
+```
+
+| Knob | 03 (default) | 04 | Effect |
+|---|---|---|---|
+| `edge_cmd_heading_deg` | 50 | 40 | Switch the edge at 40° across the hill: no overshoot, no flat cross-hill segment |
+| `edge_cmd_center_max_deg` | 25 | 10 | Smaller centring shift, so the switch heading stays near 40° |
+
+Result: 4–5 turns per 100 m (03: 3–4), mean speed (7.9 m/s) and edge angle (toe 43° / heel 38°) unchanged, slip ~3°.
+Going lower should add turns until the sidecut sets the limit ($R_{sc}\cos\theta$, see the
+[snow model](SNOW_MODEL.md#5-in-the-trained-carve)); a sharper turn at the same edge angle needs the two-half board.
+GIFs: `docs/demo/04_stage3_tighter_front.gif`, `_top.gif`.
