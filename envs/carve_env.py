@@ -39,17 +39,17 @@ from . import config
 from .rider import rider_cfg, rider_scale
 from .snow import SnowParams, air_drag, board_wrench, snow_wrench
 
-STANCE_FILE = config.ROOT / "envs/assets/stance.yaml"  # the config.yaml binding angles
+STANCE_FILE = config.ROOT / "envs/assets/stance.yaml"  # legacy name; files are stance_<front>_<back>[_<tag>].yaml
 
 
 def stance_file(binding_angles: tuple[float, float] | None = None, tag: str = ""):
-    """stance.yaml for the config's binding angles, stance_<front>_<back>.yaml for others (scripts/make_stance.py).
-    A tag (e.g. "squat") picks a variant: stance[_<front>_<back>]_<tag>.yaml."""
+    """stance_<front>_<back>.yaml for the binding angles (default: config.yaml's), made by scripts/make_stance.py.
+    A tag (e.g. "squat4") picks a variant: stance_<front>_<back>_<tag>.yaml."""
     suffix = f"_{tag}" if tag else ""
-    if binding_angles is None or list(binding_angles) == list(config.load()["rider"]["binding_angles_deg"]):
-        return STANCE_FILE.with_name(f"stance{suffix}.yaml")
-    front, back = binding_angles
+    front, back = binding_angles if binding_angles is not None else config.load()["rider"]["binding_angles_deg"]
     return STANCE_FILE.with_name(f"stance_{front:g}_{back:g}{suffix}.yaml")
+
+
 KEY_BODIES = ["right_hand", "left_hand", "right_foot", "left_foot"]
 
 
@@ -131,7 +131,7 @@ class CarveEnvCfg(DirectRLEnvCfg):
     synergy_toe_rad: dict = {}
     boot_range_deg: dict = {}  # stiff_boots: {"x"|"y"|"z": [low, high]} about the stance angle [deg]
     rider_to_height: bool = False  # scale the humanoid (stock 1.612 m) to config.yaml's rider height
-    stance_width: float | None = None  # binding centre to centre [m]; None = config.yaml (0.52)
+    stance_width: float | None = None  # binding centre to centre [m]; None = config.yaml (0.56)
     torso_twist_deg: float = 0.0  # abdomen_z half range [deg], 0 = stock ±50° (the stance already twists +48°)
     ankle_range_deg: dict = {}  # wider ankle limits, e.g. {"x": 45, "y": 80, "z": 55} (envs/rider.py _widen_ankles)
     stiff_boots: bool = False  # ankles held near their stance angle, 3× stiffer (envs/rider.py BOOT_RANGE_DEG)

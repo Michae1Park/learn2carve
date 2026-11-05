@@ -4,7 +4,7 @@ The board is one rigid link authored onto the humanoid at spawn (`envs/rider.py:
 from a real 152 cm all-mountain board. PhysX sees a thin box that touches frictionless snow; everything the board's
 *shape* does on snow (sidecut, grip) lives in the [snow model](SNOW_MODEL.md). The round tips, stripes and chevrons are
 visual only (no collision, no mass). The board is not scaled with the rider (the humanoid is scaled to 1.65 m).
-Knobs: `config.yaml` → `board`, `rider`; the demo run overrides the stance and binding angles (below). SI units.
+Knobs: `config.yaml` → `board`, `rider`; SI units.
 
 ![Snowboard top view to scale: sidecut, effective edge, bindings at +54 and +45 degrees](rider/board_top.svg)
 
@@ -47,9 +47,8 @@ first), heel edge counter-clockwise.
 stance used for carving. Not duck (front +, back −). Stance width $b = 0.56$ m, setback $s = -15$ mm (toward the
 tail). The picture shows the nose on the left.
 
-The demo run sets `binding_angles_deg=[54, 45]` and `stance_width=0.56` (with the `squat4` stance file from
-`scripts/make_stance.py`). `config.yaml` still defaults to +42° / +27° and 0.52 m, which a flatter stance would need
-a re-made stance file for.
+`config.yaml` holds the same values (`binding_angles_deg=[54, 45]`, `stance_width=0.56`); the stance file is
+`stance_54_45_squat4.yaml` from `scripts/make_stance.py`.
 
 Both feet are welded to the board: the front binding is a tree joint, the back one a loop-closing constraint (see
 [humanoid model §3](HUMANOID_MODEL.md#3-board-binding)).

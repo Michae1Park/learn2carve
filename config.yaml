@@ -2,11 +2,11 @@
 # ALL VALUES IN SI UNITS (m, kg, s, deg). Source specs mix cm and mm, so originals are kept in comments.
 
 rider:                    # Stage 1 — scales the AMP humanoid
-  height: 1.65            # 165 cm
+  height: 1.65            # 165 cm, applied with rider_to_height=true (stock humanoid is 1.612 m)
   mass: 65.0              # kg
   stance: regular         # left foot forward (toward the nose)
-  stance_width: 0.52      # 52 cm, binding centre to binding centre
-  binding_angles_deg: [42.0, 27.0]   # front / back, + = rotated toward the nose (forward stance)
+  stance_width: 0.56      # 56 cm, binding centre to binding centre
+  binding_angles_deg: [54.0, 45.0]   # front / back, + = rotated toward the nose (forward stance)
 
 board:                    # Stage 1
   length: 1.52            # 152 cm

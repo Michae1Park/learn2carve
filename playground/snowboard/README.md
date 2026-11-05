@@ -149,4 +149,4 @@ speed-dependent target (wider turns as speed grows), or a gentler slope.
 - Bound rider + board tip as one inverted pendulum on a 0.25 m base. With zero action (`--no_policy`) the
   side slip falls in ~1.5 s, but nose-first riding stays up and even wobbles into small turns on its own.
 - Changing `rider.binding_angles_deg` in `config.yaml` needs `scripts/make_stance.py` re-run. A flatter stance
-  (e.g. 15° / 0°) gives a wider base for heel/toe balance if the forward 42° / 27° stance won't learn.
+  (e.g. 15° / 0°) gives a wider base for heel/toe balance if the forward 54° / 45° stance won't learn.
