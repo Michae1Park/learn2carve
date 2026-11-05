@@ -81,8 +81,7 @@ closes both loops exactly and is saved to `envs/assets/stances/stance_<front>_<b
 | Chest twist (`abdomen_z`) | +0.83 rad (47°) toward the nose |
 | Knees (front / back) | 79° / 90° bent |
 
-Stance files are named by binding angles, `stance_<front>_<back>[_<tag>].yaml`. `stance_54_45.yaml` is
-`config.yaml`'s default; the unsuffixed `stance.yaml`/`stance_squat.yaml` belong to the old 42°/27° stance and are no longer read.
+Stance files are named by binding angles, `stance_<front>_<back>[_<tag>].yaml`.
 
 ## 5. Actions → joint targets
 
@@ -118,7 +117,7 @@ the **bold** rows; the rest are available but off.
 | **`arm_stiffness_scale=0.3`**, **`arm_action_scale=0.5`** | Softer arms (shoulder/elbow gains ×0.3) with a larger action range, so they can reach for the edge |
 | **`synergy=true`**, `synergy_toe_rad`, `synergy_smooth=0.35`, `joint_smooth=0.35` | Edge and lean actions (§5) |
 
-**Also available, off in the demo:** `thoracic` (second spine joint, 30 DoF), `compliant_drives` (per-group stiffness), `neck_stiffness_scale`, `spine_damping_scale`, `physics_hz=240` with `solver_iterations=[16,4]`, `leg_action_scale`, and `board_flex` (two-half board, see [board model §4](BOARD_MODEL.md#4-two-half-board-torsion-camber-flex-progressive-sidecut)).
+**Also available, off in the demo:** `thoracic` (second spine joint, 30 DoF), `compliant_drives` (per-group stiffness), `neck_stiffness_scale`, `spine_damping_scale`, `physics_hz=240` with `solver_iterations=[16,4]`, `leg_action_scale`, and `board_flex` (two-half board, see [board model §4](BOARD_MODEL.md#4-two-half-board-opt-in-not-used-in-the-demo)).
 
 ### Checks (`scripts/rider_check.py`: stance held 3 s, zero action)
 
