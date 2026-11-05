@@ -437,12 +437,9 @@ class CarveEnv(DirectRLEnv):
         return info
 
     def _get_rewards(self) -> torch.Tensor:
-        # Stage 3 task reward: stay upright and make progress downhill (capped so it doesn't just tuck)
-        w = config.load()["train"]["task_reward"]
-        torso_up = quat_apply(self.body_quat(self.torso_id), self.up.expand(self.num_envs, 3))
-        upright = (torso_up * self.up).sum(-1).clamp(min=0.0)
-        downhill = self.body_lin_vel(self.pelvis_id)[:, 0].clamp(0.0, w["v_max"]) / w["v_max"]
-        return w["upright"] * upright + w["downhill"] * downhill
+        """No task here: the tasks (playground/snowboard/env.py) define their own reward. The check scripts that
+        build this env directly only step it."""
+        return torch.zeros(self.num_envs, device=self.device)
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
