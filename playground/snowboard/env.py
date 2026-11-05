@@ -389,7 +389,7 @@ class SnowboardEnv(CarveEnv):
         slots = (torch.arange(k, device=self.device) + self.rsi_next) % cfg.rsi_buffer
         data = self.robot.data
         pose = data.root_link_pose_w.torch[ids].clone()
-        pose[:, :3] -= self.scene.env_origins[ids]
+        pose[:, :3] = self.to_slope(pose[:, :3]) - self.scene.env_origins[ids]  # env origins are in the slope frame
         self.rsi_root[slots] = torch.cat([pose, data.root_com_vel_w.torch[ids]], dim=-1)
         self.rsi_qpos[slots] = data.joint_pos.torch[ids]
         self.rsi_qvel[slots] = data.joint_vel.torch[ids]
@@ -406,7 +406,7 @@ class SnowboardEnv(CarveEnv):
             return
         src = torch.randint(0, self.rsi_count, (len(pick),), device=self.device)
         root = self.rsi_root[src].clone()
-        root[:, :3] += self.scene.env_origins[pick]
+        root[:, :3] = self.to_world(root[:, :3] + self.scene.env_origins[pick])
         self.robot.write_root_link_pose_to_sim_index(root_pose=root[:, :7], env_ids=pick)
         self.robot.write_root_com_velocity_to_sim_index(root_velocity=root[:, 7:], env_ids=pick)
         self.robot.write_joint_position_to_sim_index(position=self.rsi_qpos[src], env_ids=pick)
