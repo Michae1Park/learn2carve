@@ -558,7 +558,9 @@ class SnowboardEnv(CarveEnv):
                 r = cfg.rew_grab * r * self.step_dt
                 reward += r
                 self._track("rew_grab", r)
-                self._track("grab_dist_m", d)
+                active = (d > 0).float()
+                self._track("grab_active", active)
+                self._track("grab_dist_x_active_m", d)  # ÷ grab_active = mean distance during a turn
             if cfg.rew_rise:
                 near_flat = (self.edge_command().abs() < math.radians(8.0)).float()
                 tall = ((self.pelvis_height() - 0.35) / 0.2).clamp(0.0, 1.0)
