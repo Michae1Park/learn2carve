@@ -31,9 +31,9 @@ Glide acts on the board. Drag acts on the rider's pelvis: through the feet it wo
 
 On edge, the board yaws onto the arc its sidecut cuts, unless that arc needs more grip than the edge has:
 
-$$R(\theta) = R_{sc}\cos\theta \qquad \omega^* = -\operatorname{sign}(\theta)\,\frac{v_\parallel}{R(\theta)}\cdot h \qquad h = \min\!\left(1,\ \frac{\mu(\theta)\,N/m}{v_\parallel^2 / R(\theta)}\right)$$
+$$R(\theta) = R_{sc}\cos\theta \qquad \omega^* = -\mathrm{sign}(\theta)\,\frac{v_\parallel}{R(\theta)}\cdot h \qquad h = \min\!\left(1,\ \frac{\mu(\theta)\,N/m}{v_\parallel^2 / R(\theta)}\right)$$
 
-$$\tau = \operatorname{clip}\!\left(k_\omega(\omega^* - \omega),\ \pm\,\mu(\theta)\,N\,\frac{L}{4}\right)$$
+$$\tau = \mathrm{clip}\!\left(k_\omega(\omega^* - \omega),\ \pm\,\mu(\theta)\,N\,\frac{L}{4}\right)$$
 
 - $h < 1$: the arc needs more than the edge can hold, so the turn opens to radius $v^2 / (\mu g)$.
 - $|\theta| < 3°$: no steering ($\omega^* = 0$). A flat board still resists pivoting, up to the friction torque.
@@ -42,9 +42,9 @@ $$\tau = \operatorname{clip}\!\left(k_\omega(\omega^* - \omega),\ \pm\,\mu(\thet
 
 A stick-slip ("bristle") spring at the biting edge, with $z$ its deflection carried between steps:
 
-$$z_{t} = z_{t-1} + v_\perp\,\Delta t \qquad F_\perp = \operatorname{clip}\!\left(-(k\,z_t + c\,v_\perp),\ \pm\,\mu(\theta)\,N\right)$$
+$$z_{t} = z_{t-1} + v_\perp\,\Delta t \qquad F_\perp = \mathrm{clip}\!\left(-(k\,z_t + c\,v_\perp),\ \pm\,\mu(\theta)\,N\right)$$
 
-$$\mu(\theta) = \mu_{\text{flat}} + (\mu_{\text{edge}} - \mu_{\text{flat}})\cdot\operatorname{smoothstep}\!\left(\frac{|\theta|}{15°}\right)$$
+$$\mu(\theta) = \mu_{\text{flat}} + (\mu_{\text{edge}} - \mu_{\text{flat}})\cdot\mathrm{smoothstep}\!\left(\frac{|\theta|}{15°}\right)$$
 
 $$\textbf{carve: } |F_\perp| < \mu(\theta) N \qquad\qquad \textbf{skid: } |F_\perp| = \mu(\theta) N$$
 

@@ -17,7 +17,7 @@ policy only has to learn the body: how to get the board onto that edge, hold it 
 | Quantity | Definition |
 |---|---|
 | Edge angle $\theta$ | Board roll relative to the snow surface ([snow model](SNOW_MODEL.md)) |
-| Path heading $\psi$ | $\operatorname{atan2}(v_y, v_x)$: travel direction, 0 = straight down the fall line. A heel edge turns $\psi$ up, a toe edge down |
+| Path heading $\psi$ | $\mathrm{atan2}(v_y, v_x)$: travel direction, 0 = straight down the fall line. A heel edge turns $\psi$ up, a toe edge down |
 | Slip angle $\beta$ | Angle between the board's axis and its travel; ~0 when carving |
 | Balanced edge | $\sin\theta = v^2 / (g\cos\alpha \cdot R_{sc})$: the edge a rider can hold at speed $v$. 20° at 5 m/s, 41° at 7 m/s on a 9° slope |
 
@@ -31,7 +31,7 @@ emerged on its own.
 
 | Mode | Command |
 |---|---|
-| Timed (stage 2) | $\theta^*(t) = A \operatorname{clip}\big(1.8 \sin(2\pi t / T + \varphi),\ -1,\ 1\big)$: a trapezoid heel → flat → toe |
+| Timed (stage 2) | $\theta^*(t) = A \mathrm{clip}\big(1.8 \sin(2\pi t / T + \varphi),\ -1,\ 1\big)$: a trapezoid heel → flat → toe |
 | **Heading** (stage 3) | Hold one edge at $\pm A$ until the turn has come round, $\psi$ past $\pm 50°$ across the hill, then ramp through flat to the other edge over 0.6 s. Never sooner than 1 s, never later than 4 s on one edge |
 | Centring (stage 3) | The 50° switch heading moves 2° per metre off the piste centre (capped at ±25°): the turn back toward the centre runs longer, the one away from it ends sooner, so the S stays between the fences |
 
