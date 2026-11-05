@@ -1,4 +1,4 @@
-# Best carve so far (2026-11-04)
+# Best carve so far
 
 Seed 1, 12 000 steps (~17 min on one L40S). First run whose edge angle *rose* during training instead of fading flat.
 Code state: commit `359073c` (hand reward, straight penalty, cap −10) plus the later fall-height / low-band change `4cd82a0`.

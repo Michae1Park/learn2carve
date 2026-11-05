@@ -52,7 +52,7 @@ expect to tune (see [Backflip: knobs](#backflip-knobs)).
 
 | Option | What it does |
 |---|---|
-| `<run>` | The folder `train.py` prints, e.g. `logs/playground/quadruped/2026-10-02_13-07-58_ppo_trot` |
+| `<run>` | The folder `train.py` prints, e.g. `logs/playground/quadruped/<timestamp>_ppo_trot` |
 | `--checkpoint agent_4000.pt` | Checkpoint from `<run>/checkpoints/` (default `best_agent.pt`). `ls` it first |
 | `--set key=value` | Override an env field when training, e.g. `--set rew_gait=3 "cmd_vx=[0.5,1.5]"` |
 | `--num_envs N` | Robots on screen. Play defaults to 1 |

@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-ISAACLAB_COMMIT=51b1f61ac5dbf9b464d83fc0fab86e58c46cfd7a   # main, 2026-09-30 (Isaac Lab 3.0, Isaac Sim 6.1)
+ISAACLAB_COMMIT=51b1f61ac5dbf9b464d83fc0fab86e58c46cfd7a   # main (Isaac Lab 3.0, Isaac Sim 6.1)
 
 command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
 
