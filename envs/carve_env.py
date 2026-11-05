@@ -119,6 +119,9 @@ class CarveEnvCfg(DirectRLEnvCfg):
     synergy_edge_rad: dict = {"left_ankle_y": 0.5, "right_ankle_y": 0.5, "left_knee": 0.6, "right_knee": 0.6}
     synergy_lean_rad: dict = {"abdomen_x": 0.9}
     synergy_residual: float = 0.3
+    # heel side only: as the edge action goes below 0 (heel), these joints also move by edge⁻ × rad, so the hips
+    # sit back behind the heel edge (getting off a toe carve needs the pelvis behind the board, not just ankles)
+    synergy_heel_rad: dict = {}
     ankle_range_deg: dict = {}  # wider ankle limits, e.g. {"x": 45, "y": 80, "z": 55} (envs/rider.py _widen_ankles)
     stiff_boots: bool = False  # ankles held near their stance angle, 3× stiffer (envs/rider.py BOOT_RANGE_DEG)
     compliant_drives: bool = False  # per-joint-group stiffness (envs/rider.py COMPLIANT) instead of uniform, stiff
@@ -264,6 +267,9 @@ class CarveEnv(DirectRLEnv):
             for row, table in enumerate((self.cfg.synergy_edge_rad, self.cfg.synergy_lean_rad)):
                 for name, rad in table.items():
                     self.synergy_rad[row, joints.index(name)] = rad
+            self.heel_rad = torch.zeros(len(joints), device=self.device)
+            for name, rad in self.cfg.synergy_heel_rad.items():
+                self.heel_rad[joints.index(name)] = rad
 
     def _scale_to_rider_mass(self, rider_mass: float) -> None:
         """The AMP humanoid is ~36 kg. Scale masses, inertias and joint gains so dynamics stay similar at 65 kg."""
@@ -333,6 +339,7 @@ class CarveEnv(DirectRLEnv):
         if self.cfg.synergy:
             target[:, self.actuated] += self.cfg.synergy_residual * self.action_scale * self.actions
             target += self.synergy @ self.synergy_rad
+            target += (-self.synergy[:, :1]).clamp(min=0.0) * self.heel_rad
         else:
             target[:, self.actuated] += self.action_scale * self.actions
         target = target.clamp(self.joint_lower, self.joint_upper)
