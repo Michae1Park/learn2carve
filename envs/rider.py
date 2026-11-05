@@ -39,7 +39,17 @@ BOARD_WHITE = (0.9, 0.93, 0.97)
 
 # Sole centre of the humanoid's foot box, in the foot body frame (box centre (0.045, 0, -0.0225), half-height 0.0275)
 FOOT_SOLE = (0.045, 0.0, -0.05)
-HUMANOID_HEIGHT = 1.612  # m, sole to top of head in the zero pose
+HUMANOID_HEIGHT = 1.612  # m, sole to top of head in the zero pose (stock AMP humanoid)
+
+
+def rider_scale() -> float:
+    """Uniform scale that makes the humanoid config.yaml's rider height (sole to top of head)."""
+    return config.load()["rider"]["height"] / HUMANOID_HEIGHT
+
+
+def foot_sole(scale: float | None = None) -> tuple[float, float, float]:
+    k = rider_scale() if scale is None else scale
+    return tuple(k * v for v in FOOT_SOLE)
 
 
 def _quat_wxyz_z(yaw: float) -> tuple[float, float, float, float]:
@@ -176,7 +186,8 @@ def _author_board(stage, root: str, cfg: RiderSpawnCfg) -> None:
     for i, (foot, (pos, rot)) in enumerate(cfg.bindings.items()):
         # front foot -> nose half (in the tree), back foot -> tail half (loop-closing); one rigid board without flex
         target = tail_path if cfg.board_flex and pos[0] < 0 else board_path
-        fixed_joint(f"{foot}_binding", f"{root}/{foot}", target, FOOT_SOLE, identity, pos, rot, in_tree=(i == 0))
+        fixed_joint(f"{foot}_binding", f"{root}/{foot}", target, foot_sole(cfg.scale_factor), identity, pos, rot,
+                    in_tree=(i == 0))
 
     for body, (pos, rot) in cfg.world_pins.items():  # stance building only: hold bodies still in the world
         fixed_joint(f"{body}_pin", None, f"{root}/{body}", pos, rot, (0.0, 0.0, 0.0), identity, in_tree=False)
@@ -438,6 +449,8 @@ def _tune_drives(stage, root: str, cfg: RiderSpawnCfg) -> None:
         k_scale = COMPLIANT[group] if cfg.compliant_drives else 1.0
         if group == "neck":
             k_scale *= cfg.neck_stiffness_scale
+        if group in ("shoulder", "elbow"):
+            k_scale *= cfg.arm_stiffness_scale
         d_scale = k_scale * (cfg.spine_damping_scale if group in ("abdomen", "thorax") else 1.0)
         for axis in ("rotX", "rotY", "rotZ", "angular"):  # knees with knee_rotation: rotX + rotZ
             if not prim.HasAPI(UsdPhysics.DriveAPI, axis):
@@ -466,10 +479,45 @@ def _dress(stage, root: str) -> None:
                 bind_visual_material(str(visuals.GetPath()), material, stage=stage, stronger_than_descendants=True)
 
 
+def _scale_humanoid(stage, root: str, k: float) -> None:
+    """Uniform size × k about the root: link positions, joint anchors, and every link's shapes (collision and visual,
+    scaled about the link origin). Masses follow the collision volumes and are then set by _scale_to_rider_mass."""
+    from pxr import Gf, UsdGeom, UsdPhysics
+
+    top = stage.GetPrimAtPath(root)
+    for link in top.GetChildren():
+        if not link.HasAPI(UsdPhysics.RigidBodyAPI):
+            continue
+        xf = UsdGeom.Xformable(link)
+        for op in xf.GetOrderedXformOps():
+            if op.GetOpType() == UsdGeom.XformOp.TypeTransform:
+                m = Gf.Matrix4d(op.Get())
+                m.SetTranslateOnly(m.ExtractTranslation() * k)
+                op.Set(m)
+            elif op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+                op.Set(op.Get() * k)
+        for part in link.GetChildren():
+            if not part.IsA(UsdGeom.Xformable):
+                continue
+            pxf = UsdGeom.Xformable(part)
+            order = pxf.GetOrderedXformOps()
+            scale_op = pxf.AddScaleOp(opSuffix="rider")
+            scale_op.Set(Gf.Vec3f(k, k, k))
+            pxf.SetXformOpOrder([scale_op] + order)  # outermost: scales the part's offset in the link too
+    for joint in stage.GetPrimAtPath(f"{root}/joints").GetChildren():
+        j = UsdPhysics.Joint(joint)
+        for attr in (j.GetLocalPos0Attr(), j.GetLocalPos1Attr()):
+            if attr.HasAuthoredValue():
+                attr.Set(Gf.Vec3f(attr.Get()) * k)
+
+
 @clone
 def spawn_rider(prim_path: str, cfg: RiderSpawnCfg, translation=None, orientation=None, **kwargs):
     prim = spawn_from_usd_file(prim_path, cfg.usd_path, cfg, translation, orientation)
     stage = prim.GetStage()
+    if abs(cfg.scale_factor - 1.0) > 1e-6:
+        assert not cfg.thoracic, "the thoracic split uses stock torso dimensions"
+        _scale_humanoid(stage, prim_path, cfg.scale_factor)
     _fix_hinge_drives(stage, prim_path)
     if cfg.knee_rotation:
         _twist_knees(stage, prim_path)
@@ -490,6 +538,7 @@ def spawn_rider(prim_path: str, cfg: RiderSpawnCfg, translation=None, orientatio
 @configclass
 class RiderSpawnCfg(UsdFileCfg):
     func: Callable | str = spawn_rider
+    scale_factor: float = 1.0  # humanoid size × this (rider_scale() makes config.yaml's height); the board is not scaled
     board_size: tuple[float, float, float] = (1.52, 0.246, 0.008)
     board_mass: float = 2.7
     bindings: dict = {}
@@ -512,11 +561,13 @@ class RiderSpawnCfg(UsdFileCfg):
     ankle_range_deg: dict = {}  # {"x" | "y" | "z": half range [deg]}: wider ankle limits about 0; {} = stock
     torso_twist_deg: float = 0.0  # abdomen_z half range [deg]; 0 = stock (±50°)
     neck_stiffness_scale: float = 1.0  # neck PD gains × this
+    arm_stiffness_scale: float = 1.0  # shoulder + elbow PD gains × this (stock arms are servo-stiff)
     spine_damping_scale: float = 1.0  # abdomen + thorax damping × this (anti-jerk)
 
 
 def rider_cfg(stance: dict | None = None, world_pins: dict | None = None, solver_iterations: tuple[int, int] = (32, 4),
-              binding_angles: tuple[float, float] | None = None, **options) -> ArticulationCfg:
+              binding_angles: tuple[float, float] | None = None, stance_width: float | None = None,
+              **options) -> ArticulationCfg:
     """ArticulationCfg for the rider. ``stance`` (from envs/assets/stance.yaml) sets the default joint positions.
 
     solver_iterations: PhysX (position, velocity) iterations. options: RiderSpawnCfg fields (thoracic, neck / spine
@@ -539,7 +590,8 @@ def rider_cfg(stance: dict | None = None, world_pins: dict | None = None, solver
         activate_contact_sensors=True,
         board_size=(board["length"], board["waist_width"], board["thickness"]),
         board_mass=board["mass"],
-        bindings=binding_frames(board, rider | ({"binding_angles_deg": list(binding_angles)} if binding_angles else {})),
+        bindings=binding_frames(board, rider | ({"binding_angles_deg": list(binding_angles)} if binding_angles else {})
+                                | ({"stance_width": stance_width} if stance_width else {})),
         world_pins=world_pins or {},
         boot_center_deg={k: math.degrees(v) for k, v in (stance or {}).get("joint_pos", {}).items() if "ankle" in k},
         **options,

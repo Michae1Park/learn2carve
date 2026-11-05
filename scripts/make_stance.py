@@ -32,6 +32,8 @@ parser.add_argument("--back", type=float, default=0.0, help="hips pushed back [m
 parser.add_argument("--tail", type=float, default=0.0, help="hips shifted toward the tail [m] along the board (loads the back foot)")
 parser.add_argument("--pitch", type=float, default=0.0, help="pelvis hinged forward [deg] about its own y axis (+/-)")
 parser.add_argument("--twist", type=float, default=0.0, help="torso twist abdomen_z [rad]: opens the chest toward the nose")
+parser.add_argument("--to_height", action="store_true", help="scale the humanoid to config.yaml's rider height")
+parser.add_argument("--stance_width", type=float, default=None, help="binding centre to centre [m]; default config.yaml")
 parser.add_argument("--tag", default="", help="write a stance variant, e.g. squat: stance[_<front>_<back>]_<tag>.yaml")
 add_launcher_args(parser)
 args = parser.parse_args()
@@ -75,12 +77,16 @@ def main():
         from isaaclab.sim import SimulationContext
         from isaaclab.utils.math import quat_apply, quat_apply_inverse, quat_conjugate, quat_mul
 
-        from envs.rider import FOOT_SOLE, binding_frames, rider_cfg
+        from envs.rider import binding_frames, foot_sole, rider_cfg, rider_scale
+
+        scale = rider_scale() if args.to_height else 1.0
+        width = {"stance_width": args.stance_width} if args.stance_width else {}
 
         sim = SimulationContext(sim_cfg)
         sim_utils.create_prim("/World/Origin", "Xform")
         pelvis_pose = (pelvis_pos, (pelvis_quat[3], *pelvis_quat[:3]))  # wxyz for USD
-        robot_cfg = rider_cfg(world_pins={"board": board_pose, "pelvis": pelvis_pose}, binding_angles=angles)
+        robot_cfg = rider_cfg(world_pins={"board": board_pose, "pelvis": pelvis_pose}, binding_angles=angles,
+                              stance_width=args.stance_width, scale_factor=scale)
         robot_cfg = robot_cfg.replace(
             prim_path="/World/Origin/Robot",
             init_state=robot_cfg.init_state.replace(pos=pelvis_pos, rot=pelvis_quat, joint_pos=GUESS),
@@ -108,8 +114,8 @@ def main():
         bp, bq = pos[b], quat[b]
 
         # binding residual: foot sole frame vs. its binding frame on the board
-        frames = binding_frames(board, cfg["rider"] | ({"binding_angles_deg": list(angles)} if angles else {}))
-        sole = torch.tensor(FOOT_SOLE, device=pos.device)
+        frames = binding_frames(board, cfg["rider"] | ({"binding_angles_deg": list(angles)} if angles else {}) | width)
+        sole = torch.tensor(foot_sole(scale), device=pos.device)
         for foot, (bind_pos, bind_rot) in frames.items():
             f = names.index(foot)
             sole_w = pos[f] + quat_apply(quat[f], sole)

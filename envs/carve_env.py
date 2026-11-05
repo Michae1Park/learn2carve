@@ -36,7 +36,7 @@ from isaaclab_physx.physics import PhysxCfg
 from isaaclab_physx.sim.spawners.materials import PhysxRigidBodyMaterialCfg
 
 from . import config
-from .rider import rider_cfg
+from .rider import rider_cfg, rider_scale
 from .snow import SnowParams, air_drag, board_wrench, snow_wrench
 
 STANCE_FILE = config.ROOT / "envs/assets/stance.yaml"  # the config.yaml binding angles
@@ -107,6 +107,8 @@ class CarveEnvCfg(DirectRLEnvCfg):
     neck_stiffness_scale: float = 1.0
     spine_damping_scale: float = 1.0  # abdomen + thorax damping × this (anti-jerk)
     pelvis_mass_frac: float | None = None  # pelvis share of the rider's mass (stock: 0.126); None = stock
+    arm_action_scale: float | None = None  # shoulders + elbows: fraction of half-range per unit action (not × synergy_residual)
+    arm_stiffness_scale: float = 1.0  # shoulder + elbow PD gains × this
     leg_action_scale: float | None = None  # hips + knees: fraction of half-range per unit action; None = action_scale
     knee_rotation: bool = False  # + ±20° axial twist per knee (2 DoF)
     # joint groups left to their drives (held at the stance target, still physical) instead of the policy: fewer
@@ -122,6 +124,8 @@ class CarveEnvCfg(DirectRLEnvCfg):
     # heel side only: as the edge action goes below 0 (heel), these joints also move by edge⁻ × rad, so the hips
     # sit back behind the heel edge (getting off a toe carve needs the pelvis behind the board, not just ankles)
     synergy_heel_rad: dict = {}
+    rider_to_height: bool = False  # scale the humanoid (stock 1.612 m) to config.yaml's rider height
+    stance_width: float | None = None  # binding centre to centre [m]; None = config.yaml (0.52)
     torso_twist_deg: float = 0.0  # abdomen_z half range [deg], 0 = stock ±50° (the stance already twists +48°)
     ankle_range_deg: dict = {}  # wider ankle limits, e.g. {"x": 45, "y": 80, "z": 55} (envs/rider.py _widen_ankles)
     stiff_boots: bool = False  # ankles held near their stance angle, 3× stiffer (envs/rider.py BOOT_RANGE_DEG)
@@ -187,7 +191,8 @@ def apply_rider_options(cfg: CarveEnvCfg) -> None:
         neck_stiffness_scale=cfg.neck_stiffness_scale, spine_damping_scale=cfg.spine_damping_scale,
         compliant_drives=cfg.compliant_drives, board_flex=cfg.board_flex, stiff_boots=cfg.stiff_boots,
         knee_rotation=cfg.knee_rotation, ankle_range_deg=dict(cfg.ankle_range_deg),
-        torso_twist_deg=cfg.torso_twist_deg,
+        torso_twist_deg=cfg.torso_twist_deg, stance_width=cfg.stance_width, arm_stiffness_scale=cfg.arm_stiffness_scale,
+        scale_factor=rider_scale() if cfg.rider_to_height else 1.0,
     )
     cfg.scene.board_contact.prim_path = "{ENV_REGEX_NS}/Robot/board" + (".*" if cfg.board_flex else "")
 
@@ -261,6 +266,9 @@ class CarveEnv(DirectRLEnv):
         if self.cfg.leg_action_scale is not None:  # hips and knees drive the edge and the squat: give them more range
             legs = [i for i, j in enumerate(self.robot.joint_names) if "hip" in j or "knee" in j]
             scale[legs] = self.cfg.leg_action_scale
+        self.arm_joint = torch.tensor(["shoulder" in j or "elbow" in j for j in self.robot.joint_names], device=self.device)
+        if self.cfg.arm_action_scale is not None:
+            scale[self.arm_joint] = self.cfg.arm_action_scale
         self.action_scale = (scale * 0.5 * (self.joint_upper - self.joint_lower))[self.actuated]
         self.actions = torch.zeros(self.num_envs, num_dof(self.cfg), device=self.device)  # the joint part
         self.synergy = torch.zeros(self.num_envs, 2, device=self.device)
@@ -268,10 +276,10 @@ class CarveEnv(DirectRLEnv):
             self.synergy_rad = torch.zeros(2, len(joints), device=self.device)
             for row, table in enumerate((self.cfg.synergy_edge_rad, self.cfg.synergy_lean_rad)):
                 for name, rad in table.items():
-                    self.synergy_rad[row, joints.index(name)] = rad
+                    self.synergy_rad[row, joints.index(name if name in joints else f"{name}:0")] = rad  # knee_rotation
             self.heel_rad = torch.zeros(len(joints), device=self.device)
             for name, rad in self.cfg.synergy_heel_rad.items():
-                self.heel_rad[joints.index(name)] = rad
+                self.heel_rad[joints.index(name if name in joints else f"{name}:0")] = rad
 
     def _scale_to_rider_mass(self, rider_mass: float) -> None:
         """The AMP humanoid is ~36 kg. Scale masses, inertias and joint gains so dynamics stay similar at 65 kg."""
@@ -339,7 +347,9 @@ class CarveEnv(DirectRLEnv):
     def _apply_action(self):
         target = self.stance_pos.clone()  # the board's spring DoFs keep their rest target: the policy can't drive them
         if self.cfg.synergy:
-            target[:, self.actuated] += self.cfg.synergy_residual * self.action_scale * self.actions
+            residual = torch.where(self.arm_joint[self.actuated], 1.0, self.cfg.synergy_residual) \
+                if self.cfg.arm_action_scale is not None else self.cfg.synergy_residual
+            target[:, self.actuated] += residual * self.action_scale * self.actions
             target += self.synergy @ self.synergy_rad
             target += (-self.synergy[:, :1]).clamp(min=0.0) * self.heel_rad
         else:
