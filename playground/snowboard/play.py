@@ -217,7 +217,7 @@ class Recorder:
     """Two cameras that follow env 0's rider: "front" faces the rider's chest (frontside) from 5 m, "top" looks down
     on the board from 16 m up so the track behind it shows. Frames are kept on the CPU, written as GIFs at the end."""
 
-    SIZE = (480, 320)  # w, h
+    SIZE = (900, 600)  # w, h
 
     VIEWS = {"front": 30.0, "top": 18.0}  # name: focal length [mm]
 
