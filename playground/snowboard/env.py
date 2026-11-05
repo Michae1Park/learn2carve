@@ -371,8 +371,8 @@ class SnowboardEnv(CarveEnv):
             time_out = time_out | (x > self.cfg.run_length)
         return fallen | self.out_of_bounds, time_out
 
-    def _grab_reward(self, theta: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """exp(-(d/σ)²) of the inside hand to its grab point, gated by side; and that distance [m]."""
+    def _grab_parts(self, theta: torch.Tensor):
+        """Per side: (heel-turn right-hand distance, toe-turn left-hand distance, heel_turn mask, toe_turn mask)."""
         from isaaclab.utils.math import quat_apply_inverse
 
         if not hasattr(self, "grab_ids"):
@@ -383,8 +383,9 @@ class SnowboardEnv(CarveEnv):
         pb = self.body_pos(self.board_id)
         local = lambda i: quat_apply_inverse(qb, self.body_pos(i) - pb)
         # toe side of the board: where the front foot's toes point, in the board's lateral (y) axis
-        toe_fwd = quat_apply_inverse(qb, quat_apply(self.body_quat(lf), torch.tensor([1.0, 0.0, 0.0], device=self.device).expand(self.num_envs, 3)))
-        s_toe = torch.sign(toe_fwd[:, 1]).where(toe_fwd[:, 1].abs() > 1e-3, torch.ones_like(toe_fwd[:, 1]))
+        x_axis = torch.tensor([1.0, 0.0, 0.0], device=self.device).expand(self.num_envs, 3)
+        toe_fwd = quat_apply_inverse(qb, quat_apply(self.body_quat(lf), x_axis))
+        s_toe = torch.where(toe_fwd[:, 1].abs() > 1e-3, torch.sign(toe_fwd[:, 1]), torch.ones_like(toe_fwd[:, 1]))
         w = self.board_half_width
         zeros = torch.zeros_like(s_toe)
         heel_target = torch.stack([local(lf)[:, 0], s_toe * w, zeros + 0.05], -1)  # right hand, toe edge, front foot
@@ -392,9 +393,17 @@ class SnowboardEnv(CarveEnv):
         cmd = self.edge_command()
         heel_turn = (cmd < -math.radians(10.0)) & (theta < -math.radians(10.0))
         toe_turn = (cmd > math.radians(10.0)) & (theta > math.radians(10.0))
-        d = torch.where(heel_turn, (local(rh) - heel_target).norm(dim=-1),
-                        torch.where(toe_turn, (local(lh) - toe_target).norm(dim=-1), zeros))
+        return (local(rh) - heel_target).norm(dim=-1), (local(lh) - toe_target).norm(dim=-1), heel_turn, toe_turn
+
+    def _grab_reward(self, theta: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """exp(-(d/σ)²) of the inside hand to its grab point, gated by side; and that distance [m]."""
+        d_heel, d_toe, heel_turn, toe_turn = self._grab_parts(theta)
+        d = torch.where(heel_turn, d_heel, torch.where(toe_turn, d_toe, torch.zeros_like(d_heel)))
         r = torch.exp(-(d / self.cfg.grab_sigma_m).square()) * (heel_turn | toe_turn).float()
+        self._track("grab_heel_active", heel_turn.float())
+        self._track("grab_heel_dist_x_active_m", d_heel * heel_turn)
+        self._track("grab_toe_active", toe_turn.float())
+        self._track("grab_toe_dist_x_active_m", d_toe * toe_turn)
         return r, d
 
     def _rsi_record(self):
