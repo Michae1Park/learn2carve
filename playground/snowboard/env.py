@@ -120,6 +120,13 @@ class SnowboardEnvCfg(CarveEnvCfg):
     pose_ref_sigma_deg = 15.0
     edge_cmd_amp_deg = (20.0, 50.0)  # level 0 -> 1
     edge_cmd_period_s = (4.6, 4.0)  # one full S (two edges, a turn every ~2 s), level 0 -> 1; ±15 % per episode
+    # "heading": hold one edge until the path heading reaches ±edge_cmd_heading_deg across the hill (a finished turn),
+    # or edge_cmd_max_s passes; then ramp through flat to the other edge over edge_cmd_ramp_s. "timer": the sine above
+    edge_cmd_mode = "timer"
+    edge_cmd_heading_deg = 50.0
+    edge_cmd_min_s = 1.0
+    edge_cmd_max_s = 3.0
+    edge_cmd_ramp_s = 0.6
     edge_cmd_sharpness = 1.8  # trapezoid sharpness: clamp(hold · sin, -1, 1)
     edge_cmd_level_up_deg = 12.0  # mean tracking error below this raises the level, above 2× lowers it
     edge_cmd_level_steps = 2000  # steps to go from level 0 to 1 at best
@@ -274,9 +281,34 @@ class SnowboardEnv(CarveEnv):
             return torch.sign(self.cmd_hold) * balanced
         lv, cfg = self.cmd_level, self.cfg
         amp = math.radians(cfg.edge_cmd_amp_deg[0] + lv * (cfg.edge_cmd_amp_deg[1] - cfg.edge_cmd_amp_deg[0]))
+        if cfg.edge_cmd_mode == "heading":
+            self._init_heading_cmd()
+            u = ((self.cmd_since + ahead_s) / cfg.edge_cmd_ramp_s).clamp(0.0, 1.0)
+            return self.cmd_from + (self.cmd_side * amp - self.cmd_from) * u
         t = self.episode_length_buf.float() * self.step_dt + ahead_s
         arg = 2 * math.pi * t / self.cmd_period + self.cmd_phase
         return amp * (cfg.edge_cmd_sharpness * arg.sin()).clamp(-1.0, 1.0)
+
+    def _init_heading_cmd(self):
+        if not hasattr(self, "cmd_side"):
+            n, d = self.num_envs, self.device
+            self.cmd_side = torch.where(torch.rand(n, device=d) < 0.5, -1.0, 1.0)  # +1 toe, -1 heel
+            self.cmd_from = torch.zeros(n, device=d)  # command value when the last ramp started [rad]
+            self.cmd_since = torch.zeros(n, device=d)  # time since the last switch [s]
+
+    def _step_heading_cmd(self):
+        """Once per step: switch edges when the turn has come round (heel turns heading +, toe turns it -), or on
+        the timer backstop; never sooner than edge_cmd_min_s after the last switch."""
+        cfg = self.cfg
+        self._init_heading_cmd()
+        now = self.edge_command()
+        self.cmd_since += self.step_dt
+        psi, h = self.path_heading(), math.radians(cfg.edge_cmd_heading_deg)
+        done_turn = ((self.cmd_side < 0) & (psi > h)) | ((self.cmd_side > 0) & (psi < -h))
+        switch = (self.cmd_since > cfg.edge_cmd_min_s) & (done_turn | (self.cmd_since > cfg.edge_cmd_max_s))
+        self.cmd_from = torch.where(switch, now, self.cmd_from)
+        self.cmd_side = torch.where(switch, -self.cmd_side, self.cmd_side)
+        self.cmd_since = torch.where(switch, torch.zeros_like(self.cmd_since), self.cmd_since)
 
     def _adapt_edge_cmd(self, err_deg: torch.Tensor):
         alive = ~self.reset_terminated
@@ -457,9 +489,13 @@ class SnowboardEnv(CarveEnv):
         self.slip_z[pick] = self.rsi_slip[src]
         self.edge_ema[pick] = self.rsi_ema[src]
         self.cmd_phase[pick] = math.pi / 2  # at the toe peak: the flip to the heel comes a quarter period in
+        if self.cfg.edge_cmd_mode == "heading":  # on the toe edge, already turned for a while
+            self.cmd_side[pick], self.cmd_from[pick], self.cmd_since[pick] = 1.0, 0.0, self.cfg.edge_cmd_ramp_s
         self.rsi_started[pick] = 1.0
 
     def _get_rewards(self) -> torch.Tensor:
+        if self.cfg.edge_cmd and self.cfg.edge_cmd_mode == "heading" and not self.cfg.edge_cmd_hold:
+            self._step_heading_cmd()
         if self.cfg.rsi_frac > 0:
             self._rsi_record()
         self._update_turns()
@@ -745,6 +781,11 @@ class SnowboardEnv(CarveEnv):
         lv, (p0, p1) = self.cmd_level, self.cfg.edge_cmd_period_s
         self.cmd_period[env_ids] = (p0 + lv * (p1 - p0)) * (0.85 + 0.3 * torch.rand(m, device=self.device))
         self.cmd_phase[env_ids] = math.pi * (torch.rand(m, device=self.device) < 0.5).float()  # heel or toe first
+        if self.cfg.edge_cmd_mode == "heading":
+            self._init_heading_cmd()
+            self.cmd_side[env_ids] = torch.where(torch.rand(m, device=self.device) < 0.5, -1.0, 1.0)
+            self.cmd_from[env_ids] = 0.0  # ramp from flat onto the first edge
+            self.cmd_since[env_ids] = 0.0
         if not hasattr(self, "rsi_started"):
             self.rsi_started = torch.zeros(self.num_envs, device=self.device)
         self.rsi_started[env_ids] = 0.0
