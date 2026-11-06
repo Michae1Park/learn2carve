@@ -7,20 +7,19 @@ rider:                    # Unitree G1 29-DoF + Dex3 hands, stock (Isaac Lab G1_
   mass: 34.0              # kg, the USD's own masses (not rescaled)
   stance: regular         # left foot forward (toward the nose)
   stance_width: 0.35      # binding centre to centre: ~ the G1 shank (knee to sole 0.354 m)
-  binding_angles_deg: [15.0, 15.0]   # feet parallel: the hips only yaw, knees bend across the board (edging)
+  binding_angles_deg: [60.0, 50.0]   # steep forward stance: hips face the nose, toes and heels stay off the snow at a high edge
 
-board:                    # a youth board sized to the robot
-  length: 1.18            # 118 cm, in the 115–120 cm range for a 132 cm rider
-  effective_edge: 0.88    # m
-  waist_width: 0.22       # the G1 foot is 0.15 m long; boots overhang less than an adult's
-  nose_width: 0.247
-  tail_width: 0.247
-  sidecut_radius: [9.5, 6.5, 9.5]
-  sidecut_radius_eff: 7.6 # m, kept from the adult board: the same edge angle turns no tighter.
-                          #   depth d = (0.247 - 0.22) / 2 = 0.0135 m, R ≈ 0.88² / (8 d) = 7.2 m
-  setback: 0.0            # centred stance: equal load on both feet
+board:                    # the adult board scaled to 142 cm (k = 1.42 / 1.52 = 0.934): length, widths and sidecut × k
+  length: 1.42            # 142 cm
+  effective_edge: 1.065   # m, 1.14 × k
+  waist_width: 0.230      # m, 0.246 × k: narrower rolls onto edge quicker; still clears the G1's 0.15 m feet
+  nose_width: 0.270       # m, 0.289 × k
+  tail_width: 0.270
+  sidecut_radius: [10.0, 6.35, 10.0]   # m, the adult [10.7, 6.8, 10.7] × k
+  sidecut_radius_eff: 7.1 # m, 7.6 × k. depth d = (0.270 - 0.230) / 2 = 0.020 m, R ≈ 1.065² / (8 d) = 7.1 m
+  setback: -0.015         # -15 mm toward the tail, as physical.yaml
   thickness: 0.008
-  mass: 1.7               # kg, a youth board (1.5–2.0 kg)
+  mass: 1.5               # kg, light
 
 piste:
   fence_half_width: 20.0

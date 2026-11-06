@@ -161,7 +161,12 @@ class CarveEnvCfg(DirectRLEnvCfg):
     )
 
     def __post_init__(self):
-        self.scene.robot = rider_cfg(stance=load_stance())
+        # placeholder rider; apply_rider_options rebuilds it once the overrides (robot, stance tag) are in. A saved
+        # run's physical.yaml can name binding angles with no untagged stance (a G1 run's 60/50), so it may be absent
+        try:
+            self.scene.robot = rider_cfg(stance=load_stance())
+        except FileNotFoundError:
+            self.scene.robot = None
 
 
 def configured_binding_angles(cfg: CarveEnvCfg) -> tuple[float, float] | None:

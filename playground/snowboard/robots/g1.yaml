@@ -18,3 +18,13 @@ env:
   synergy_edge_rad: {left_knee_joint: 0.5, right_knee_joint: 0.5, left_ankle_pitch_joint: -0.3, right_ankle_pitch_joint: -0.3}
   synergy_lean_rad: {waist_roll_joint: 0.4}
   synergy_toe_rad: {}
+
+  # --- cues scaled to the robot: lengths × 0.8 (1.32 / 1.65 m). Speeds stay: the board and its sidecut are the adult ones
+  fall_height: 0.12             # m, pelvis above the snow (0.15)
+  sitting_height: 0.10          # m, pelvis above the board (0.12)
+
+rewards:
+  rise_start_m: 0.28            # pelvis above the board (0.35)
+  rise_width_m: 0.16            # (0.2)
+  grab_linear_m: 0.96           # (1.2)
+  grab_sigma_m: 0.48            # (0.6)
