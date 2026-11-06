@@ -213,7 +213,7 @@ toe peak. Without them every episode started tall, the only pose the policy had 
 |  |  | Torso height | 1 | $`h`$ | Root height above the snow |
 |  |  | Torso orientation | 6 | $`(\mathbf{t},\ \mathbf{n})`$ | Root frame as tangent and normal vectors, 3 + 3 |
 |  |  | Torso velocity | 3 + 3 | $`\mathbf{v},\ \boldsymbol{\omega}`$ | Linear and angular velocity |
-|  |  | Hands and feet | 12 | $`\mathbf{p}_k - \mathbf{p}_{\mathrm{root}}`$ | 4 key bodies relative to the root, x, y, z each |
+|  |  | Hands and feet | 12 | $`\mathbf{p}_k - \mathbf{p}_{\mathrm{root}}`$ | Positions of the right hand, left hand, right foot and left foot relative to the root, in the world frame (x, y, z each) |
 |  | Board | Edge angle | 1 | $`\theta`$ | Roll relative to the snow |
 |  |  | Velocity | 2 | $`v_\parallel,\ v_\perp`$ | Along and across the board |
 |  |  | Yaw rate | 1 | $`\dot\psi_b`$ | Board rotation about the snow normal |
