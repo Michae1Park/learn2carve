@@ -343,6 +343,25 @@ def dress(stage, root: str) -> None:
 
 # -- board --------------------------------------------------------------------------------------------------------
 
+ROBOT_FINISH = (0.045, 0.045, 0.05)  # near-black, satin
+
+
+def darken(stage, root: str) -> None:
+    """One dark material over every link's visuals (instanced meshes take it from their instance root)."""
+    from pxr import Sdf, Usd, UsdShade
+
+    material = UsdShade.Material.Define(stage, f"{root}/Looks/robot_finish")
+    shader = UsdShade.Shader.Define(stage, f"{root}/Looks/robot_finish/shader")
+    shader.CreateIdAttr("UsdPreviewSurface")
+    shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(ROBOT_FINISH)
+    shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.45)
+    shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(0.2)
+    material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+    for part in Usd.PrimRange(stage.GetPrimAtPath(root)):  # instance proxies are skipped; their roots are bound
+        if part.GetName() == "visuals":
+            UsdShade.MaterialBindingAPI.Apply(part).Bind(material, UsdShade.Tokens.strongerThanDescendants)
+
+
 def add_board_graphics(stage, body_at, length: float, width: float, thickness: float) -> None:
     """Stadium-shaped deck with stripes, tip rings and chevrons; no mass, no collision. body_at(x) → body path."""
     from pxr import Gf, UsdGeom
@@ -474,8 +493,9 @@ def add_board(stage, root: str, cfg: RiderSpawnCfg) -> None:
 def spawn_rider(prim_path: str, cfg: RiderSpawnCfg, translation=None, orientation=None, **kwargs):
     prim = spawn_from_usd_file(prim_path, cfg.usd_path, cfg, translation, orientation)
     stage = prim.GetStage()
-    if cfg.robot != "amp":  # a stock robot: only the board is added
+    if cfg.robot != "amp":  # a stock robot: only the board is added, and a darker finish
         add_board(stage, prim_path, cfg)
+        darken(stage, prim_path)
         return prim
     if abs(cfg.scale_factor - 1.0) > 1e-6:
         assert not cfg.thoracic, "the thoracic split uses stock torso dimensions"
