@@ -48,26 +48,24 @@ running edge error is below 12° and falls above 24°. The policy sees the comma
 ## 2. Stages
 
 Each stage learns a different thing, but the difference lies in the **task setup** (start, edge command, slope), not
-the reward: both track the edge command with the same terms. Stage 2 learns the switch move, stage 3 uses it to ride
-the course.
+the reward: all track the edge command with the same terms. Stage 2 learns the switch move, stage 3 uses it to ride
+the course, stage 4 tightens the turns.
 
-| | **Stage 2: change edges** | **Stage 3: full S** |
-|---|---|---|
-| Script | `train_stage2_transition.sh` (from scratch) | `train_stage3_full_s.sh` (warm-started from stage 2) |
-| Learns | Get from one edge to the other without falling | Link turns into an S that stays on the piste |
-| Start | Already in a carve, balanced on an edge (80% toe), 4–5.5 m/s; 50% from recorded toe-carve states | Riding flat, heading within ±20° of the fall line, 4–5.5 m/s; 30% from recorded states |
-| Edge command | On a **timer**: heel ↔ toe, period $T$ 6 → 4 s | On **heading**: switch once the turn comes round to 50°, steered toward the centre |
-| Edge angle | ±15 → 30° | ±25 → 45° |
-| Slope, episode | 7°, 10 s | 9°, 20 s |
-| Speed | Starts 4–5.5 m/s | Free (eval mean 7.9 m/s): the steeper slope reaches the speed a 40°+ edge needs |
-| Reward | `rewards/stage2.yaml` | `rewards/stage3.yaml`: the same, except the hand grab (weight 10 instead of 5, linear instead of Gaussian) |
-
-**Tuning within a stage** changes the edge command, not the reward: `saved/04_stage3_tighter` is stage 3 with an
-earlier switch heading (40° instead of 50°), not a stage of its own (§7).
+| | **Stage 2: change edges** | **Stage 3: full S** | **Stage 4: tighter turns** |
+|---|---|---|---|
+| Script | `train_stage2_transition.sh` (from scratch) | `train_stage3_full_s.sh` (warm-started from stage 2) | Stage 3 script with `--set edge_cmd_heading_deg=40 edge_cmd_center_max_deg=10` (warm-started from stage 3, §7) |
+| Learns | Get from one edge to the other without falling | Link turns into an S that stays on the piste | End each turn sooner, without the overshoot |
+| Start | Already in a carve, balanced on an edge (80% toe), 4–5.5 m/s; 50% from recorded toe-carve states | Riding flat, heading within ±20° of the fall line, 4–5.5 m/s; 30% from recorded states | As stage 3 |
+| Edge command | On a **timer**: heel ↔ toe, period $T$ 6 → 4 s | On **heading**: switch once the turn comes round to 50°, steered toward the centre (shift up to 25°) | On heading at **40°**, centring shift up to 10° |
+| Edge angle | ±15 → 30° | ±25 → 45° | As stage 3 |
+| Slope, episode | 7°, 10 s | 9°, 20 s | As stage 3 |
+| Speed | Starts 4–5.5 m/s | Free (eval mean 7.9 m/s): the steeper slope reaches the speed a 40°+ edge needs | As stage 3 |
+| Reward | `rewards/stage2.yaml` | `rewards/stage3.yaml`: the same, except the hand grab (weight 10 instead of 5, linear instead of Gaussian) | As stage 3 |
+| Saved run | `saved/01_stage2_switches` | `saved/03_stage3_centred` | `saved/04_stage3_tighter` |
 
 **No hold-only stage.** An earlier stage 1 trained only to hold a carve; stage 2 warm-started from it never learned
 to change edges (it kept holding the edge stage 1 taught). Stage 2 from scratch learns the hold anyway, because its
-episodes start in a carve. The demo runs stage 2 from scratch, continues it, then warm-starts stage 3 from it.
+episodes start in a carve. The demo runs stage 2 from scratch, continues it, then warm-starts stage 3 from it, and stage 4 from stage 3.
 
 **Recorded-state starts** (`rsi_frac`). During training the env records rider states from more than 3 s into an
 episode on the toe edge (the low, bowed carve where the switch to the heel is hardest) and restarts a share of
@@ -170,9 +168,9 @@ Diagnostics:
 **Open.** Turns overshoot (the heading reaches 56–91° across the hill at the switch, aimed at 50–60°), and the board
 skids briefly through each edge change.
 
-**Tightening the turns (reference run).** The overshoot is the heading switch firing late: the edge command only flips
+**Tightening the turns (stage 4).** The overshoot is the heading switch firing late: the edge command only flips
 once $\psi$ passes the switch heading, and the board keeps swinging while the command ramps through flat. Switch
-earlier and the turn ends nearer the target. `saved/04_stage3_tighter` does this on top of the stage 3 script, warm-started
+earlier and the turn ends nearer the target. Stage 4 (`saved/04_stage3_tighter`) does this on top of the stage 3 script, warm-started
 from this run:
 
 ```bash
