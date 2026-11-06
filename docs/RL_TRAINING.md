@@ -3,8 +3,9 @@
 One env (`playground/snowboard/env.py`, task `carve`) and plain **PPO** (`skrl`). The rider learns linked carved
 turns by **tracking a commanded edge angle**: a heel ↔ toe edge command plays the part of the turn planner, and the
 policy learns to put the board on that edge and stay up. Training runs in **stages**, each warm-started from the
-last. No demonstration and no motion data. Knobs: `SnowboardEnvCfg` (`--set key=value`), the stage scripts in
-`scripts/`, `playground/snowboard/ppo.yaml`. SI units; angles in ° unless marked rad.
+last. No demonstration and no motion data. Settings live in three places: `SnowboardEnvCfg` in
+`playground/snowboard/env.py` (env and reward; override with `--set key=value`), the stage scripts in `scripts/`,
+and the PPO settings in `playground/snowboard/ppo.yaml`. SI units; angles in ° unless marked rad.
 
 ![Training loop: policy at 30 Hz, PD joints, snow model and PhysX at 120 Hz, rewards, PPO update every 48 steps](rider/training_loop.svg)
 
