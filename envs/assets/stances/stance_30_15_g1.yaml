@@ -55,35 +55,35 @@ pelvis_quat:
 hip_height: 0.68
 open_deg: 60.0
 joint_target:
-  left_hip_pitch_joint: -1.08879
-  right_hip_pitch_joint: -0.71123
-  waist_yaw_joint: 0.53027
-  left_hip_roll_joint: -0.30556
-  right_hip_roll_joint: -0.4768
-  waist_roll_joint: -0.14801
-  left_hip_yaw_joint: -0.3347
-  right_hip_yaw_joint: -0.57063
-  waist_pitch_joint: -0.42132
-  left_knee_joint: 0.62779
-  right_knee_joint: 1.06606
-  left_shoulder_pitch_joint: -0.00313
+  left_hip_pitch_joint: -1.08873
+  right_hip_pitch_joint: -0.71113
+  waist_yaw_joint: 0.53028
+  left_hip_roll_joint: -0.30547
+  right_hip_roll_joint: -0.47671
+  waist_roll_joint: -0.0272
+  left_hip_yaw_joint: -0.33482
+  right_hip_yaw_joint: -0.57067
+  waist_pitch_joint: -0.08331
+  left_knee_joint: 0.62798
+  right_knee_joint: 1.06627
+  left_shoulder_pitch_joint: -0.0031
   right_shoulder_pitch_joint: -0.02278
-  left_ankle_pitch_joint: 0.0346
-  right_ankle_pitch_joint: -0.64063
-  left_shoulder_roll_joint: 0.03593
-  right_shoulder_roll_joint: 0.02954
-  left_ankle_roll_joint: -0.08546
-  right_ankle_roll_joint: 0.0793
-  left_shoulder_yaw_joint: 0.0207
-  right_shoulder_yaw_joint: 0.02426
-  left_elbow_joint: -0.06148
+  left_ankle_pitch_joint: 0.03599
+  right_ankle_pitch_joint: -0.6396
+  left_shoulder_roll_joint: 0.03599
+  right_shoulder_roll_joint: 0.0296
+  left_ankle_roll_joint: -0.08485
+  right_ankle_roll_joint: 0.07971
+  left_shoulder_yaw_joint: 0.02073
+  right_shoulder_yaw_joint: 0.0243
+  left_elbow_joint: -0.06145
   right_elbow_joint: -0.0716
   left_wrist_roll_joint: -0.00076
   right_wrist_roll_joint: 0.00099
-  left_wrist_pitch_joint: -0.02036
+  left_wrist_pitch_joint: -0.02035
   right_wrist_pitch_joint: -0.02603
-  left_wrist_yaw_joint: 0.00323
-  right_wrist_yaw_joint: 0.00523
+  left_wrist_yaw_joint: 0.00324
+  right_wrist_yaw_joint: 0.00524
   left_hand_index_0_joint: 0.0
   left_hand_middle_0_joint: 0.0
   left_hand_thumb_0_joint: -0.0
@@ -98,3 +98,4 @@ joint_target:
   right_hand_thumb_1_joint: -0.0
   left_hand_thumb_2_joint: 0.0
   right_hand_thumb_2_joint: -0.0
+joint_target_gains: unitree

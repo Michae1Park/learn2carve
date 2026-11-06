@@ -55,35 +55,35 @@ pelvis_quat:
 hip_height: 0.65
 open_deg: 45.0
 joint_target:
-  left_hip_pitch_joint: -1.25861
-  right_hip_pitch_joint: -1.0215
-  waist_yaw_joint: -0.00066
-  left_hip_roll_joint: 0.20009
-  right_hip_roll_joint: 0.09411
-  waist_roll_joint: -0.00426
-  left_hip_yaw_joint: 0.23819
-  right_hip_yaw_joint: 0.08416
-  waist_pitch_joint: -0.45871
-  left_knee_joint: 0.82592
-  right_knee_joint: 1.17831
-  left_shoulder_pitch_joint: -0.00058
-  right_shoulder_pitch_joint: -0.00636
-  left_ankle_pitch_joint: -0.0309
-  right_ankle_pitch_joint: -0.6192
-  left_shoulder_roll_joint: 0.00394
-  right_shoulder_roll_joint: -0.00452
-  left_ankle_roll_joint: 0.08364
-  right_ankle_roll_joint: -0.01362
-  left_shoulder_yaw_joint: -0.00022
-  right_shoulder_yaw_joint: -0.0
-  left_elbow_joint: -0.06104
-  right_elbow_joint: -0.07119
+  left_hip_pitch_joint: -1.2584
+  right_hip_pitch_joint: -1.02122
+  waist_yaw_joint: -0.00064
+  left_hip_roll_joint: 0.20027
+  right_hip_roll_joint: 0.09423
+  waist_roll_joint: -0.00118
+  left_hip_yaw_joint: 0.23815
+  right_hip_yaw_joint: 0.08364
+  waist_pitch_joint: -0.08836
+  left_knee_joint: 0.82607
+  right_knee_joint: 1.17861
+  left_shoulder_pitch_joint: -0.00045
+  right_shoulder_pitch_joint: -0.00628
+  left_ankle_pitch_joint: -0.02926
+  right_ankle_pitch_joint: -0.6179
+  left_shoulder_roll_joint: 0.00404
+  right_shoulder_roll_joint: -0.00442
+  left_ankle_roll_joint: 0.08659
+  right_ankle_roll_joint: -0.01159
+  left_shoulder_yaw_joint: -0.00016
+  right_shoulder_yaw_joint: 6.0e-05
+  left_elbow_joint: -0.06102
+  right_elbow_joint: -0.07121
   left_wrist_roll_joint: -0.00087
   right_wrist_roll_joint: 0.00084
-  left_wrist_pitch_joint: -0.02029
-  right_wrist_pitch_joint: -0.02597
-  left_wrist_yaw_joint: -0.00044
-  right_wrist_yaw_joint: 0.00038
+  left_wrist_pitch_joint: -0.02028
+  right_wrist_pitch_joint: -0.02598
+  left_wrist_yaw_joint: -0.00043
+  right_wrist_yaw_joint: 0.0004
   left_hand_index_0_joint: 0.0
   left_hand_middle_0_joint: 0.0
   left_hand_thumb_0_joint: -0.0

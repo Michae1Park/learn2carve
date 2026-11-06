@@ -32,7 +32,8 @@ PASSIVE_GROUPS = {"_hand_": 14, "wrist": 6}  # DoF-name substring -> DoF count
 
 
 def implicit_actuators() -> dict:
-    """Unitree's deployment gains for the G1 29-DoF (unitree_rl_lab UNITREE_G1_29DOF_CFG), as PhysX implicit drives.
+    """Unitree's deployment gains for the G1 29-DoF (unitree_rl_lab UNITREE_G1_29DOF_CFG), as PhysX implicit drives,
+    except the waist roll/pitch (kp 200, see below).
 
     Isaac Lab's G1_29DOF_CFG drives the waist at kp 5000 and the arms at 3000 with 300 N·m: far stiffer and stronger
     than the real motors, and nearly undamped (the torso rang). These are the gains Unitree deploys with, so a policy
@@ -52,10 +53,14 @@ def implicit_actuators() -> dict:
         "waist_yaw": ImplicitActuatorCfg(
             joint_names_expr=["waist_yaw_joint"], stiffness=200.0, damping=5.0, armature=arm,
             joint_effort_limit=88.0, joint_velocity_limit=32.0),
-        "ankles_waist": ImplicitActuatorCfg(
-            joint_names_expr=[".*_ankle_.*_joint", "waist_roll_joint", "waist_pitch_joint"], stiffness=40.0,
-            damping={".*_ankle_.*": 2.0, "waist_.*": 5.0}, armature=arm, joint_effort_limit=50.0,
-            joint_velocity_limit=37.0),
+        "ankles": ImplicitActuatorCfg(
+            joint_names_expr=[".*_ankle_.*_joint"], stiffness=40.0, damping=2.0, armature=arm,
+            joint_effort_limit=50.0, joint_velocity_limit=37.0),
+        # waist roll/pitch: Unitree runs kp 40, which caps the torque at ~20 N·m over the ±30° range; a carve needs the
+        # motors' full 50 N·m to hold the torso against the lean. kp 200 / kd 5 as Unitree's waist yaw, same motors.
+        "waist_roll_pitch": ImplicitActuatorCfg(
+            joint_names_expr=["waist_roll_joint", "waist_pitch_joint"], stiffness=200.0, damping=5.0, armature=arm,
+            joint_effort_limit=50.0, joint_velocity_limit=37.0),
         "arms": ImplicitActuatorCfg(
             joint_names_expr=[".*_shoulder_.*_joint", ".*_elbow_joint", ".*_wrist_roll_joint"], stiffness=40.0,
             damping=1.0, armature=arm, joint_effort_limit=25.0, joint_velocity_limit=37.0),
