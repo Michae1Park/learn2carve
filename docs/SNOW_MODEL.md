@@ -2,7 +2,7 @@
 
 PhysX friction is isotropic, so a board on it can't carve. `envs/snow.py` replaces it with three forces applied
 to the board each physics step (120 Hz): **glide**, **sidecut steering** and **edge grip**. Pure torch, batched over
-envs. Knobs: `config.yaml` → `snow`, `board`. SI units; angles in rad unless marked °.
+envs. Knobs: `envs/physical.yaml` → `snow`, `board`. SI units; angles in rad unless marked °.
 
 Driven alone, the model matches closed-form physics: **turn radius within 3%**, **terminal speed within 0.2 m/s**.
 

@@ -25,13 +25,14 @@ from isaaclab.utils.math import quat_apply, quat_mul
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_physx.sim.spawners.materials import PhysxRigidBodyMaterialCfg
 
-from . import config
+from . import physical
 from .rider import camber_angle, rider_cfg, rider_scale
 from .snow import SnowParams, air_drag, board_wrench, snow_wrench
 
 GRAVITY = 9.81
 POLICY_HZ = 30
-STANCE_DIR = config.ROOT / "envs/assets/stances"
+DEFAULT_SLOPE_DEG = 9.0  # the demo's stage 3 slope
+STANCE_DIR = physical.ROOT / "envs/assets/stances"
 KEY_BODIES = ["right_hand", "left_hand", "right_foot", "left_foot"]
 STOCK_JOINTS = 28
 AMP_OBS_EXTRA = 25  # root height, tangent/normal, root velocities, key body offsets
@@ -43,7 +44,7 @@ IDENTITY_XYZW = (0.0, 0.0, 0.0, 1.0)
 
 
 def stance_file(binding_angles: tuple[float, float] | None = None, tag: str = ""):
-    front, back = binding_angles if binding_angles is not None else config.load()["rider"]["binding_angles_deg"]
+    front, back = binding_angles if binding_angles is not None else physical.load()["rider"]["binding_angles_deg"]
     suffix = f"_{tag}" if tag else ""
     return STANCE_DIR / f"stance_{front:g}_{back:g}{suffix}.yaml"
 
@@ -95,7 +96,7 @@ class CarveEnvCfg(DirectRLEnvCfg):
     action_scale = 0.5  # fraction of each joint's half-range per unit action
 
     mountain: bool = False
-    slope_deg: float | None = None  # None: config.yaml
+    slope_deg: float = DEFAULT_SLOPE_DEG  # stage 2 rides 7, set by its script
     fall_height = 0.45  # m, pelvis above the snow
     start_speed = (2.0, 5.0)  # m/s
     start_yaw_deg = 0.0
@@ -227,12 +228,12 @@ class CarveEnv(DirectRLEnv):
 
     def __init__(self, cfg: CarveEnvCfg, render_mode: str | None = None, **kwargs):
         apply_rider_options(cfg)
-        self.slope_deg = cfg.slope_deg if cfg.slope_deg is not None else config.load()["slope"]["angle_deg"]
+        self.slope_deg = cfg.slope_deg
         self.q_slope = torch.tensor(apply_slope(cfg, self.slope_deg), device=cfg.sim.device)
         self.q_slope_inv = self.q_slope * torch.tensor([-1.0, -1.0, -1.0, 1.0], device=cfg.sim.device)
         super().__init__(cfg, render_mode, **kwargs)
 
-        params = config.load()
+        params = physical.load()
         self.robot = self.scene["robot"]
         self.contact = self.scene["board_contact"]
         self.up = torch.tensor([0.0, 0.0, 1.0], device=self.device)

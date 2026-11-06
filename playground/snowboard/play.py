@@ -107,7 +107,7 @@ def main():
 
     sim_cfg = sim_utils.SimulationCfg()
     with launch_simulation(sim_cfg, args):
-        from envs import config
+        from envs import physical
         from playground.snowboard.env import SnowboardEnv, SnowboardEnvCfg
         from playground.snowboard.trail import SnowTrail
 
@@ -122,7 +122,7 @@ def main():
             env, agent = load_policy(raw_env, run, args.run, args.checkpoint, cfg_dir=HERE)
         if not args.follow:
             set_focal_length(raw_env.cfg.viewer.cam_prim_path, args.focal)
-        board = config.load()["board"]
+        board = physical.load()["board"]
         trail = SnowTrail(board["length"], board["waist_width"], raw_env.q_slope)
 
         print(f"\n[play] {'no policy' if args.no_policy else args.run.name}  run {run_length:.0f} m, "
@@ -276,10 +276,10 @@ def free_view_cfg(slope_deg: float | None, cam_x: float):
     """Placed once, 0.6 m above the snow cam_x down the run, looking back at env 0's start; the mouse owns it after."""
     from isaaclab.envs import ViewerCfg
 
-    from envs import config
+    from envs.carve_env import DEFAULT_SLOPE_DEG
     from envs.mountain import slope_to_world
 
-    angle = slope_deg if slope_deg is not None else config.load()["slope"]["angle_deg"]
+    angle = slope_deg if slope_deg is not None else DEFAULT_SLOPE_DEG
     return ViewerCfg(eye=slope_to_world(angle, cam_x, 3.0, 0.6), lookat=slope_to_world(angle, 0.0, 0.0, 1.0),
                      origin_type="env")
 

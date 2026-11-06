@@ -82,7 +82,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
 
     rewards: RewardsCfg = RewardsCfg()
 
-    # rider: the same in every stage (docs/HUMANOID_MODEL.md §6); stance and bindings come from config.yaml
+    # rider: the same in every stage (docs/HUMANOID_MODEL.md §6); stance and bindings come from envs/physical.yaml
     stance_tag = "squat4"
     rider_to_height = True
     pelvis_mass_frac = 0.2

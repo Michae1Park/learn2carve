@@ -22,7 +22,7 @@ parser.add_argument("--hip_height", type=float, default=0.80, help="pelvis heigh
 parser.add_argument("--open_deg", type=float, default=20.0, help="pelvis rotation from facing the toe edge toward the nose")
 parser.add_argument("--seconds", type=float, default=6.0)
 parser.add_argument("--angles", type=float, nargs=2, default=None, metavar=("FRONT", "BACK"),
-                    help="binding angles [deg]; default config.yaml. Others write envs/assets/stances/stance_<front>_<back>.yaml")
+                    help="binding angles [deg]; default envs/physical.yaml. Others write envs/assets/stances/stance_<front>_<back>.yaml")
 parser.add_argument("--knee", type=float, default=0.6, help="initial guess: knee flexion [rad]")
 parser.add_argument("--hip_y", type=float, default=-0.35, help="initial guess: hip pitch [rad], negative = flexed")
 parser.add_argument("--ankle_y", type=float, default=-0.25, help="initial guess: ankle pitch [rad]")
@@ -32,8 +32,8 @@ parser.add_argument("--back", type=float, default=0.0, help="hips pushed back [m
 parser.add_argument("--tail", type=float, default=0.0, help="hips shifted toward the tail [m] along the board (loads the back foot)")
 parser.add_argument("--pitch", type=float, default=0.0, help="pelvis hinged forward [deg] about its own y axis (+/-)")
 parser.add_argument("--twist", type=float, default=0.0, help="torso twist abdomen_z [rad]: opens the chest toward the nose")
-parser.add_argument("--to_height", action="store_true", help="scale the humanoid to config.yaml's rider height")
-parser.add_argument("--stance_width", type=float, default=None, help="binding centre to centre [m]; default config.yaml")
+parser.add_argument("--to_height", action="store_true", help="scale the humanoid to envs/physical.yaml's rider height")
+parser.add_argument("--stance_width", type=float, default=None, help="binding centre to centre [m]; default envs/physical.yaml")
 parser.add_argument("--tag", default="", help="write a stance variant, e.g. squat: stance[_<front>_<back>]_<tag>.yaml")
 add_launcher_args(parser)
 args = parser.parse_args()
@@ -45,7 +45,7 @@ import yaml
 
 import isaaclab.sim as sim_utils
 
-from envs import config
+from envs import physical
 
 # initial guess: bent knees, flexed hips, feet turned toward the nose
 GUESS = {".*_knee": args.knee, ".*_hip_y": args.hip_y, ".*_ankle_y": args.ankle_y, "left_hip_z": 0.38,
@@ -57,7 +57,7 @@ if args.guess_from is not None:
 
 
 def main():
-    cfg = config.load()
+    cfg = physical.load()
     angles = tuple(args.angles) if args.angles else None
     board = cfg["board"]
     board_top = board["thickness"] / 2

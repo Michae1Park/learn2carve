@@ -9,7 +9,7 @@ motion data. SI units; angles in ° unless marked rad.
 
 | Settings | Where | Override |
 |---|---|---|
-| Physical facts: rider size, stance, board, snow | `config.yaml` (stance pose: `envs/assets/stances/`) | edit the file |
+| Physical facts: rider size, stance, board, snow | `envs/physical.yaml` (stance pose: `envs/assets/stances/`) | edit the file |
 | Rider options, the same in every stage | `SnowboardEnvCfg` defaults in `playground/snowboard/env.py` ([humanoid model §6](HUMANOID_MODEL.md#6-rider-options-carveenvcfg-flags---set)) | `--set key=value` |
 | Task: slope, starts, edge command | `scripts/train_stage*.sh`, the only settings that differ between stages | `--set key=value` |
 | Reward weights and term shapes | `playground/snowboard/rewards/stage2.yaml`, `stage3.yaml` (fields of `RewardsCfg`) | `--rewards FILE`, `--set rewards.key=value` |

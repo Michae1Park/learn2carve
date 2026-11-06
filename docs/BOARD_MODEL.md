@@ -7,7 +7,7 @@ The board is a real 152 cm all-mountain board, authored onto the humanoid at spa
   (sidecut, edge grip) lives in the [snow model](SNOW_MODEL.md).
 - **Looks:** the round tips, stripes and chevrons are visual only (no collision, no mass).
 - **Scale:** the board is not scaled with the rider (the humanoid is scaled to 1.65 m).
-- **Knobs:** `config.yaml` → `board`, `rider`. SI units.
+- **Knobs:** `envs/physical.yaml` → `board`, `rider`. SI units.
 
 ![Snowboard top view to scale: sidecut, effective edge, bindings at +54 and +45 degrees](rider/board_top.svg)
 
@@ -50,7 +50,7 @@ first), heel edge counter-clockwise.
 stance used for carving. Not duck (front +, back −). Stance width $b = 0.56$ m, setback $s = -15$ mm (toward the
 tail). The picture shows the nose on the left.
 
-`config.yaml` holds the same values (`binding_angles_deg=[54, 45]`, `stance_width=0.56`); the stance file is
+`envs/physical.yaml` holds the same values (`binding_angles_deg=[54, 45]`, `stance_width=0.56`); the stance file is
 `stance_54_45_squat4.yaml` from `scripts/make_stance.py`.
 
 Both feet are welded to the board: the front binding is a tree joint, the back one a loop-closing constraint (see

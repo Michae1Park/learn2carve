@@ -22,7 +22,7 @@ parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.R
 parser.add_argument("--num_envs", type=int, default=9)
 parser.add_argument("--seconds", type=float, default=10.0)
 parser.add_argument("--hold", type=float, default=2.0, help="seconds of plain stance before edging")
-parser.add_argument("--slope", type=float, default=None, help="slope angle [deg] (default: config.yaml)")
+parser.add_argument("--slope", type=float, default=None, help="slope angle [deg] (default: CarveEnvCfg, 9)")
 parser.add_argument("--start_speed", type=float, default=None, help="speed at reset [m/s] (default: env range)")
 parser.add_argument("--edge", type=float, default=None, help="one ankle action for all envs (default: sweep -1..1)")
 add_launcher_args(parser)

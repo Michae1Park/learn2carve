@@ -20,7 +20,7 @@ from isaaclab.sim.utils.prims import clone
 from isaaclab.utils import configclass, replace
 from isaaclab_assets import HUMANOID_28_CFG
 
-from . import config
+from . import physical
 
 JACKET = (0.85, 0.07, 0.05)
 OUTFIT = {
@@ -64,7 +64,7 @@ ANKLE_DOF_PREFIX = {"right_foot": "right_ankle", "left_foot": "left_ankle"}
 
 
 def rider_scale() -> float:
-    return config.load()["rider"]["height"] / HUMANOID_HEIGHT
+    return physical.load()["rider"]["height"] / HUMANOID_HEIGHT
 
 
 def foot_sole(scale: float | None = None) -> tuple[float, float, float]:
@@ -544,7 +544,7 @@ def rider_cfg(stance: dict | None = None, world_pins: dict | None = None, solver
 
     The two-binding loop needs a converged solver: below 32/4 position/velocity iterations the joints sag.
     """
-    cfg = config.load()
+    cfg = physical.load()
     board, rider = dict(cfg["board"]), dict(cfg["rider"])
     if binding_angles:
         rider["binding_angles_deg"] = list(binding_angles)

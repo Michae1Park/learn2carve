@@ -2,7 +2,7 @@
 
 The rider is Isaac Lab's **28-DoF AMP humanoid** (`humanoid_28.usd`, capsule bodies), scaled to a 65 kg, 1.65 m rider and
 bound to the board as one articulation (`envs/rider.py`, `envs/carve_env.py`). PhysX simulates it; the policy only
-sets joint targets. Knobs: `config.yaml` → `rider`, plus the `CarveEnvCfg` flags of §6, which the demo run sets from its training scripts. SI units; angles in ° unless marked rad.
+sets joint targets. Knobs: `envs/physical.yaml` → `rider`, plus the `CarveEnvCfg` flags of §6, which the snowboard env turns on by default. SI units; angles in ° unless marked rad.
 
 **Changes from stock** (details in §1, §6): scaled to a 65 kg, 1.65 m body with a heavier pelvis, a passive knee-twist
 joint, a wider torso-twist range, boot-stiff ankles and softer arms.
@@ -104,11 +104,11 @@ Without synergy (baseline) the 28 joint actions move $\pm 50\%$ of the half-rang
 
 The `CarveEnvCfg` defaults are the baseline above. The snowboard env (`SnowboardEnvCfg` in
 `playground/snowboard/env.py`) turns on the **bold** rows by default, in every stage; the rest are available but off.
-Stance width and binding angles come from `config.yaml`.
+Stance width and binding angles come from `envs/physical.yaml`.
 
 | Flag | Change |
 |---|---|
-| **`rider_to_height=true`** | Humanoid scaled ×1.024 to the 1.65 m of `config.yaml` |
+| **`rider_to_height=true`** | Humanoid scaled ×1.024 to the 1.65 m of `envs/physical.yaml` |
 | **`stance_width=0.56`** | Bindings 0.56 m apart (config default 0.56 as well) |
 | **`binding_angles_deg=[54,45]`** | Forward stance, the config default; hips face more toward the nose |
 | **`pelvis_mass_frac=0.2`** | **Heavy root**: the pelvis carries 20% of the mass (stock 12.6%), the rest scale down to keep 65 kg |

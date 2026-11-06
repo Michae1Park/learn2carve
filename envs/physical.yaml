@@ -1,5 +1,5 @@
-# learn2carve — MVP parameters. CLI flags override per run.
-# ALL VALUES IN SI UNITS (m, kg, s, deg). Source specs mix cm and mm, so originals are kept in comments.
+# learn2carve — physical facts: rider, board, snow (loaded by envs/physical.py). Training settings live elsewhere:
+# SnowboardEnvCfg, scripts/train_stage*.sh, playground/snowboard/rewards/. ALL VALUES IN SI UNITS (m, kg, s, deg). Source specs mix cm and mm, so originals are kept in comments.
 
 rider:                    # the AMP humanoid, scaled to this rider
   height: 1.65            # 165 cm, applied with rider_to_height=true (stock humanoid is 1.612 m)
@@ -21,9 +21,6 @@ board:
   thickness: 0.008        # collision box only. True camber: ~4–6 mm at the edges, ~8–10 mm at the inserts;
                           #   one 8 mm box is the MVP stand-in (camber profile ignored)
   mass: 2.7               # kg
-
-slope:                    # gravity is tilted instead of the ground (infinite slope, no terrain edges)
-  angle_deg: 9.0          # the demo's stage 3 slope (stage 2 trains on 7, set by its script)
 
 snow:                     # envs/snow.py (SnowParams), groomed hardpack
   mu_glide: 0.05          # along-board friction, typical waxed base on hardpack 0.03–0.08
