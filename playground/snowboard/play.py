@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from playground.common import (DEFAULT_CHECKPOINT, LOG_ROOT, add_suppress_arg, load_policy, make_env,
-                               parse_overrides, run_overrides)
+                               load_run, parse_overrides, run_overrides)
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
@@ -101,7 +101,7 @@ class RunStats:
 
 
 def main():
-    run = yaml.safe_load((args.run / "run.yaml").read_text()) if args.run else {"overrides": {}}
+    run = load_run(args.run) if args.run else {"overrides": {}}
     trail_png = args.run / "trail.png" if args.run else LOG_ROOT / "no_policy_trail.png"
     trail_png.parent.mkdir(parents=True, exist_ok=True)
 
@@ -126,7 +126,7 @@ def main():
         trail = SnowTrail(board["length"], board["waist_width"], raw_env.q_slope)
 
         print(f"\n[play] {'no policy' if args.no_policy else args.run.name}  run {run_length:.0f} m, "
-              f"speed command {env0(raw_env.v_cmd):.1f} m/s, fence ±{raw_env.cfg.fence_half_width:.0f} m")
+              f"speed command {env0(raw_env.v_cmd):.1f} m/s, fence ±{raw_env.fence_half_width:.0f} m")
         print(f"[play] {RunStats.HEADER}")
         recorder = Recorder(raw_env) if args.record else None
         longest_seconds, longest_marks, rows = ride(env, raw_env, agent, trail, recorder)
@@ -136,7 +136,7 @@ def main():
 
         trail.marks = longest_marks
         trail.save_png(trail_png, f"carve: {longest_seconds:.1f} s at {env0(raw_env.v_cmd):.1f} m/s commanded",
-                       fence=raw_env.cfg.fence_half_width, x_end=run_length)
+                       fence=raw_env.fence_half_width, x_end=run_length)
         print(f"[play] track of the longest episode ({longest_seconds:.1f} s) -> {trail_png}")
         env.close()
 

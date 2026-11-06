@@ -1,0 +1,38 @@
+# learn2carve — physical facts: rider, board, snow (loaded by envs/physical.py). Training knobs live in
+# playground/snowboard/env.yaml. ALL VALUES IN SI UNITS (m, kg, s, deg). Source specs mix cm and mm, so originals are kept in comments.
+
+rider:                    # the AMP humanoid, scaled to this rider
+  height: 1.65            # 165 cm, applied with rider_to_height=true (stock humanoid is 1.612 m)
+  mass: 65.0              # kg
+  stance: regular         # left foot forward (toward the nose)
+  stance_width: 0.56      # 56 cm, binding centre to binding centre
+  binding_angles_deg: [54.0, 45.0]   # front / back, + = rotated toward the nose (forward stance)
+
+board:
+  length: 1.52            # 152 cm
+  effective_edge: 1.14    # 1140 mm, edge length in contact with snow
+  waist_width: 0.246      # 246 mm
+  nose_width: 0.289       # 289 mm
+  tail_width: 0.289       # 289 mm
+  sidecut_radius: [10.7, 6.8, 10.7]   # m, nose / waist / tail (progressive sidecut)
+  sidecut_radius_eff: 7.6 # m, single-radius equivalent used by the MVP snow model:
+                          #   depth d = (0.289 - 0.246) / 2 = 0.0215 m, R ≈ L_edge² / (8 d) = 7.56 m
+  setback: -0.015         # -15 mm, stance centre offset toward the tail
+  thickness: 0.008        # collision box only. True camber: ~4–6 mm at the edges, ~8–10 mm at the inserts;
+                          #   one 8 mm box is the MVP stand-in (camber profile ignored)
+  mass: 2.7               # kg
+
+piste:
+  fence_half_width: 20.0  # m either side of the centre; crossing a fence ends the episode like a fall
+
+snow:                     # envs/snow.py (SnowParams), groomed hardpack
+  mu_glide: 0.05          # along-board friction, typical waxed base on hardpack 0.03–0.08
+  mu_flat: 0.15           # lateral grip with a flat base: skids easily
+  mu_edge: 1.5            # lateral grip fully on edge: |F_lat| ≤ mu · N (sharp edge on hardpack)
+  edge_lock_deg: 15.0     # edge angle at which grip reaches mu_edge
+  min_edge_deg: 3.0       # below this the board is "flat": no sidecut steering
+  k_yaw: 50.0             # N·m·s, gain pulling board yaw rate toward v / (R_eff · cos θ)
+  cd_area: 0.5            # m², C_d · A of rider + board, sets terminal speed
+  air_density: 1.0        # kg/m³ at resort altitude
+  grip_stiffness: 20000.0 # N/m, lateral spring of the biting edge (stick-slip grip)
+  grip_damping: 800.0     # N·s/m; grip acts on the board alone, so keep it stable for the ~7 kg board end

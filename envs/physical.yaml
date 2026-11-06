@@ -22,6 +22,9 @@ board:
                           #   one 8 mm box is the MVP stand-in (camber profile ignored)
   mass: 2.7               # kg
 
+piste:
+  fence_half_width: 20.0  # m either side of the centre; crossing a fence ends the episode like a fall
+
 snow:                     # envs/snow.py (SnowParams), groomed hardpack
   mu_glide: 0.05          # along-board friction, typical waxed base on hardpack 0.03–0.08
   mu_flat: 0.15           # lateral grip with a flat base: skids easily

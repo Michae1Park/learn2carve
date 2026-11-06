@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from playground.common import load_policy, make_env, parse_overrides, run_overrides
+from playground.common import load_policy, make_env, load_run, parse_overrides, run_overrides
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
@@ -33,7 +33,7 @@ import isaaclab.sim as sim_utils
 with launch_simulation(sim_utils.SimulationCfg(), args):
     from playground.snowboard.env import SnowboardEnv, SnowboardEnvCfg
 
-    run = yaml.safe_load((args.run / "run.yaml").read_text())
+    run = load_run(args.run)
     ov = run_overrides(run) | {"rsi_frac": 0.0} | parse_overrides(args.set)
     raw = make_env(SnowboardEnv, SnowboardEnvCfg(), ov, args.num_envs, sim_utils.SimulationCfg(), "true", legacy=True)
     env, agent = load_policy(raw, run, args.run, args.checkpoint)

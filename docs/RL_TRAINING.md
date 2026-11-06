@@ -11,13 +11,23 @@ motion data. SI units; angles in ° unless marked rad.
 |---|---|---|
 | File | Holds |
 |---|---|
-| `envs/physical.yaml` | Physical facts: rider size, stance, board, snow (stance pose: `envs/assets/stances/`) |
+| `envs/physical.yaml` | Physical facts: rider size, stance, board, snow, piste width (stance pose: `envs/assets/stances/`) |
 | **`playground/snowboard/env.yaml`** | **Every training knob with its default and a comment:** hill, starts, falls, edge command, curriculum, recorded-state starts, rider options, actions, reward. The defaults are the stage 3 setup |
 | `playground/snowboard/stages/stage2.yaml`, `stage3.yaml`, `stage4.yaml` | Only what each stage changes from `env.yaml` |
 | `playground/snowboard/ppo.yaml` | PPO |
 
-Train a stage with `train.py --stage stage2`; `--set key=value` changes an `env.yaml` key for one run. A run's
-`run.yaml` records the full settings, so `play.py` and the diagnostics replay it as trained.
+Train a stage with `train.py --stage stage2`; `--set key=value` changes an `env.yaml` key for one run.
+
+**A run folder is self-contained.** Training writes everything needed to rebuild the policy's world next to its
+checkpoints, and `play.py` and the diagnostics read those copies, not the repo's current files:
+
+| File | Holds |
+|---|---|
+| `run.yaml` | Every `env.yaml` setting as trained (`saved/` keeps only these; a fresh run also records rewards and steps) |
+| `physical.yaml` | Rider, board, snow, piste |
+| `stance_*.yaml` | The stance pose |
+| `ppo.yaml` | The policy network, needed to load the checkpoint |
+| `checkpoints/` | The trained weights |
 
 ## 1. The task: follow the edge command
 

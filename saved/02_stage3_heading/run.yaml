@@ -1,64 +1,71 @@
+# The env this policy was trained in: every env.yaml key, as trained. With physical.yaml, the stance file and
+# ppo.yaml (the policy network) next to it, play.py rebuilds it without the repo's current settings.
 task: carve
 algo: ppo
-seed: 42
+stage: stage3
 overrides:
-  edge_cmd_max_s: 3.0
-  edge_cmd_center_deg_per_m: 0.0
-  edge_target_deg: 40
-  binding_angles_deg:
-  - 54
-  - 45
-  stance_tag: squat4
-  speed_cap: 9.0
+  slope_deg: 9
+  episode_length_s: 20
+  run_length: null
+  start_speed_turns:
+  - 4
+  - 5.5
+  start_heading_deg: 20
+  carve_start: false
+  carve_start_toe_frac: 0.8
   speed_cmd:
   - 6
   - 8
-  rew_guide: 0
+  lying_deg: 95
+  fall_height: 0.15
+  sitting_height: 0.12
+  on_side_deg: 85
+  reverse_slip_deg: 100
+  reverse_min_speed: 2.0
+  min_turn_deg: 55
+  turn_min_speed: 5.0
+  edge_cmd_mode: heading
+  edge_cmd_amp_deg:
+  - 25
+  - 45
+  edge_cmd_period_s:
+  - 5.0
+  - 4.0
+  edge_cmd_sharpness: 1.8
+  edge_cmd_heading_deg: 50
+  edge_cmd_center_deg_per_m: 0.0
+  edge_cmd_center_max_deg: 25
+  edge_cmd_min_s: 1.0
+  edge_cmd_max_s: 3.0
+  edge_cmd_ramp_s: 0.6
+  edge_cmd_hold: false
+  edge_cmd_level_init: 0.0
+  edge_cmd_level_fixed: false
+  edge_cmd_level_up_deg: 12
+  edge_cmd_level_steps: 2000
+  rsi_frac: 0.3
+  rsi_min_s: 3.0
+  rsi_toe_deg: 12
+  rsi_buffer: 8192
+  rsi_min_samples: 256
+  rsi_per_step: 32
+  physics_hz: 120
+  solver_iterations:
+  - 32
+  - 4
+  stance_tag: squat4
+  rider_to_height: true
   pelvis_mass_frac: 0.2
-  edge_cmd: true
-  guide_steps: 0
-  rew_alive: 0
-  rew_speed: 0
-  rew_speed_cap: 0
-  rew_straight: 0
-  rew_uphill: 0
-  rew_edge_rate: 0
-  rew_low: 0
-  rew_bow: 0
-  rew_facing: 0
-  rew_hand: 0
-  rew_hip: 0
-  rew_height: 0
-  rew_hip_tail: 0
-  rew_arm: 0
-  rew_balance: 0
-  rew_edge_switch: 0
-  rew_edge_hold: 0
-  rew_wrong_edge: 0
-  rew_release: 0
-  rew_traverse: 0
-  rew_swing: 0
-  rew_deep_edge: 0
-  rew_edge_cmd: 30
-  rew_fall: -50
-  edge_cmd_clean: false
-  rew_carve: 0
-  rew_turn: 0
-  rew_action_rate: 0
-  episode_length_s: 20
-  slope_deg: 9
+  knee_rotation: true
+  passive_joints:
+  - knee:2
   ankle_range_deg:
     x: 45
     y: 80
     z: 55
-  rider_to_height: true
-  stance_width: 0.56
-  knee_rotation: true
-  passive_joints:
-  - knee:2
+  torso_twist_deg: 90
   arm_stiffness_scale: 0.3
   arm_action_scale: 0.5
-  torso_twist_deg: 90
   stiff_boots: true
   boot_range_deg:
     y:
@@ -70,36 +77,15 @@ overrides:
     z:
     - -5
     - 5
+  board_flex: false
+  thoracic: false
+  compliant_drives: false
+  action_scale: 0.25
+  synergy: true
   synergy_toe_rad:
     left_knee: 0.4
     right_knee: 0.4
     left_hip_y: -0.3
     right_hip_y: -0.3
-  synergy: true
-  carve_start: false
-  edge_cmd_hold: false
-  start_speed_turns:
-  - 4
-  - 5.5
-  rew_pose_ref: 10
-  edge_cmd_period_s:
-  - 5.0
-  - 4.0
-  edge_cmd_sigma_deg: 30
-  rew_edge_side: 20
-  edge_cmd_amp_deg:
-  - 25
-  - 45
-  lying_deg: 95
-  carve_start_toe_frac: 0.8
-  rew_tilt: -10
-  rew_rise: 30
-  rsi_frac: 0.3
-  rew_grab: 10
-  grab_sigma_m: 0.6
   synergy_smooth: 0.35
   joint_smooth: 0.35
-  grab_linear_m: 1.2
-  edge_cmd_mode: heading
-num_envs: 2048
-timesteps: 16000

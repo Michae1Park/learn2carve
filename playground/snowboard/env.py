@@ -17,21 +17,14 @@ import torch
 from isaaclab.utils import configclass, index_fill_
 from isaaclab.utils.math import quat_apply, quat_apply_inverse
 
+from envs import physical
 from envs.carve_env import GRAVITY, CarveEnv, CarveEnvCfg, base_obs_size, num_dof
-from envs.mountain import FENCE_HALF_WIDTH
 from envs.snow import board_frame
 from playground.common import ENV_YAML, apply_settings, read_settings
 
 TASK_OBS = 19
 SYNERGY_OBS = 2
-BALANCE_RADIUS = 7.6  # m, sidecut radius used to pick the edge that balances a speed
-TURN_MIN_SPEED = 5.0  # m/s
-SITTING_HEIGHT = 0.12
-ON_SIDE_EDGE = math.radians(85.0)
-REVERSE_MIN_SPEED = 2.0
 FALL_REASONS = ("height", "lying", "sitting", "on_side", "reverse")
-RSI_MIN_SAMPLES = 256
-RSI_PER_STEP = 32
 
 deg = math.radians
 
@@ -80,7 +73,6 @@ class SnowboardEnvCfg(CarveEnvCfg):
 
     observation_space = 87 + 28 + TASK_OBS  # recomputed from the DoF
     mountain = True
-    fence_half_width: float = FENCE_HALF_WIDTH  # the visual fences stand here
     rewards: RewardsCfg = RewardsCfg()
 
     run_length: float | None = MISSING
@@ -91,7 +83,11 @@ class SnowboardEnvCfg(CarveEnvCfg):
     speed_cmd: tuple[float, float] = MISSING
     lying_deg: float = MISSING
     reverse_slip_deg: float = MISSING
+    reverse_min_speed: float = MISSING
+    sitting_height: float = MISSING
+    on_side_deg: float = MISSING
     min_turn_deg: float = MISSING
+    turn_min_speed: float = MISSING
 
     edge_cmd_mode: str = MISSING
     edge_cmd_amp_deg: tuple[float, float] = MISSING
@@ -113,6 +109,8 @@ class SnowboardEnvCfg(CarveEnvCfg):
     rsi_min_s: float = MISSING
     rsi_toe_deg: float = MISSING
     rsi_buffer: int = MISSING
+    rsi_min_samples: int = MISSING
+    rsi_per_step: int = MISSING
 
     def __post_init__(self):
         super().__post_init__()
@@ -131,6 +129,9 @@ class SnowboardEnv(CarveEnv):
         self._init_task_state(cfg.scene.num_envs, cfg.sim.device, cfg)  # super().__init__ resets every env
         super().__init__(cfg, render_mode, **kwargs)
         self.min_turn = deg(cfg.min_turn_deg)
+        facts = physical.load()
+        self.sidecut_radius = facts["board"]["sidecut_radius_eff"]  # picks the edge that balances a speed
+        self.fence_half_width = facts["piste"]["fence_half_width"]
         self._find_task_bodies()
 
     def _init_task_state(self, n: int, device, cfg: SnowboardEnvCfg):
@@ -191,7 +192,7 @@ class SnowboardEnv(CarveEnv):
     def balanced_edge(self, speed: torch.Tensor) -> torch.Tensor:
         """|Edge| whose sidecut arc balances this speed."""
         g_normal = GRAVITY * math.cos(deg(self.slope_deg))
-        return torch.asin((speed.square() / (g_normal * BALANCE_RADIUS)).clamp(max=0.9))
+        return torch.asin((speed.square() / (g_normal * self.sidecut_radius)).clamp(max=0.9))
 
     # -- rider posture ------------------------------------------------------------------------------------------------
 
@@ -282,7 +283,7 @@ class SnowboardEnv(CarveEnv):
         """A turn: the path crosses the fall line after swinging at least min_turn_deg to one side."""
         psi = self.path_heading()
         side = torch.sign(psi) * (psi.abs() > 0.02)
-        crossed = (side != 0) & (self.turn_side != 0) & (side != self.turn_side) & (self.board_speed() > TURN_MIN_SPEED)
+        crossed = (side != 0) & (self.turn_side != 0) & (side != self.turn_side) & (self.board_speed() > self.cfg.turn_min_speed)
         turn_done = crossed & (self.turn_swing >= self.min_turn)
         self.turn_count += turn_done.float()
         self.since_turn = torch.where(turn_done, torch.zeros_like(psi), self.since_turn + self.step_dt)
@@ -303,7 +304,7 @@ class SnowboardEnv(CarveEnv):
         zeros = torch.zeros_like(psi)
         return torch.stack(
             [self.board_speed(), self.v_cmd, psi.sin(), psi.cos(), beta.sin(), beta.cos(), yaw.sin(), yaw.cos(),
-             y / self.cfg.fence_half_width, self.turn_side, self.turn_swing, self.since_turn.clamp(max=10.0) / 5.0,
+             y / self.fence_half_width, self.turn_side, self.turn_swing, self.since_turn.clamp(max=10.0) / 5.0,
              zeros, zeros, zeros, zeros,
              self.edge_command(), self.edge_command(0.3), self.edge_command(0.6)],
             dim=-1,
@@ -312,13 +313,13 @@ class SnowboardEnv(CarveEnv):
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         too_low, time_out = super()._get_dones()
         lying = self.torso_up_cos() < math.cos(deg(self.cfg.lying_deg))
-        sitting = self.pelvis_height() < SITTING_HEIGHT
-        on_side = self.edge_angle().abs() > ON_SIDE_EDGE if self.snow_info else torch.zeros_like(lying)
-        reverse = (self.slip_angle().abs() > deg(self.cfg.reverse_slip_deg)) & (self.board_speed() > REVERSE_MIN_SPEED)
+        sitting = self.pelvis_height() < self.cfg.sitting_height
+        on_side = self.edge_angle().abs() > deg(self.cfg.on_side_deg) if self.snow_info else torch.zeros_like(lying)
+        reverse = (self.slip_angle().abs() > deg(self.cfg.reverse_slip_deg)) & (self.board_speed() > self.cfg.reverse_min_speed)
         self.fall_why = torch.stack([too_low, lying, sitting, on_side, reverse], -1)
         fallen = self.fall_why.any(-1)
         x, y = self.position().unbind(-1)
-        self.out_of_bounds = y.abs() > self.cfg.fence_half_width
+        self.out_of_bounds = y.abs() > self.fence_half_width
         if self.cfg.run_length is not None:
             time_out = time_out | (x > self.cfg.run_length)
         return fallen | self.out_of_bounds, time_out
@@ -439,7 +440,7 @@ class SnowboardEnv(CarveEnv):
         ids = (settled & on_toe_edge & ~self.reset_buf).nonzero().squeeze(-1)
         if len(ids) == 0:
             return
-        ids = ids[torch.randperm(len(ids), device=self.device)[:RSI_PER_STEP]]
+        ids = ids[torch.randperm(len(ids), device=self.device)[:self.cfg.rsi_per_step]]
         slots = (torch.arange(len(ids), device=self.device) + self.rsi_next) % cfg.rsi_buffer
         data = self.robot.data
         pose = data.root_link_pose_w.torch[ids].clone()
@@ -452,7 +453,7 @@ class SnowboardEnv(CarveEnv):
         self.rsi_count = min(cfg.rsi_buffer, self.rsi_count + len(ids))
 
     def _rsi_restore(self, env_ids: torch.Tensor):
-        if self.rsi_count < RSI_MIN_SAMPLES:
+        if self.rsi_count < self.cfg.rsi_min_samples:
             return
         picked = env_ids[coin(len(env_ids), self.device, self.cfg.rsi_frac)]
         if len(picked) == 0:

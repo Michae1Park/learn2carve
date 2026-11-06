@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from playground.common import LOG_ROOT, add_train_args, make_env, new_run, run_overrides, train
+from playground.common import LOG_ROOT, add_train_args, make_env, new_run, run_overrides, save_world, train
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
@@ -40,6 +40,7 @@ def main():
 
         env = make_env(SnowboardEnv, SnowboardEnvCfg(), run_overrides(run), run["num_envs"], sim_cfg,
                        args.suppress_warnings)
+        save_world(run_dir, env.cfg)
         train(env, agent_cfg, run_dir, run, args.seed, args.init_from)
 
 

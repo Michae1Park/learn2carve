@@ -14,13 +14,12 @@ import numpy as np
 import isaaclab.sim as sim_utils
 
 ROOT = "/World/Mountain"
-FENCE_HALF_WIDTH = 20.0  # m
 FENCE_X = (-10.0, 400.0)
 POLE_SPACING = 4.0
 POLE_HEIGHT = 1.6
 NET_ROW_HEIGHTS = [0.3 + 0.2 * i for i in range(6)]
 NET_STRAND = 0.02
-PISTE_HALF_WIDTH = FENCE_HALF_WIDTH + 8.0
+PISTE_MARGIN = 8.0  # m of groomed snow beyond each fence
 HEADWALL_X = -600.0
 TERRAIN_X = (-1500.0, 1600.0)
 TERRAIN_Y = 1500.0
@@ -38,6 +37,12 @@ BARK = (0.25, 0.16, 0.10)
 NET = (1.0, 0.42, 0.18)
 POLE = (0.75, 0.15, 0.10)
 SKY = (0.42, 0.80, 0.92)
+
+
+def fence_half_width() -> float:
+    from . import physical
+
+    return physical.load()["piste"]["fence_half_width"]
 
 
 def slope_to_world(slope_deg: float, x, y, z=0.0):
@@ -69,7 +74,7 @@ class Terrain:
 
     def height(self, x, y):
         x, y = np.asarray(x, float), np.asarray(y, float)
-        beyond_piste = np.abs(y) - PISTE_HALF_WIDTH
+        beyond_piste = np.abs(y) - (fence_half_width() + PISTE_MARGIN)
         above_headwall = HEADWALL_X - x
         valley = np.where(beyond_piste > 0, 0.2 * beyond_piste + 4e-4 * beyond_piste**2, 0.0)
         headwall = np.where(above_headwall > 0, 0.12 * above_headwall + 1.2e-4 * above_headwall**2, 0.0)
@@ -164,7 +169,7 @@ def add_forest(slope_deg: float, terrain: Terrain, rng: random.Random, count: in
         if placed == count:
             break
         x = rng.uniform(-300.0, 1200.0)
-        y = rng.choice((-1, 1)) * (FENCE_HALF_WIDTH + 6.0 + rng.expovariate(1 / 140.0))
+        y = rng.choice((-1, 1)) * (fence_half_width() + 6.0 + rng.expovariate(1 / 140.0))
         h = float(terrain.height(x, y))
         if h > TREE_LINE or float(terrain.steepness(x, y)) > TREE_MAX_STEEPNESS:
             continue
@@ -179,7 +184,7 @@ def add_fence(slope_deg: float):
     pole = sim_utils.CylinderCfg(radius=0.05, height=POLE_HEIGHT, visual_material=material(POLE, 0.5))
     net = material(NET, 0.9)
     x0, x1 = FENCE_X
-    W = FENCE_HALF_WIDTH
+    W = fence_half_width()
     t = NET_STRAND
     mid_height = POLE_HEIGHT / 2
 

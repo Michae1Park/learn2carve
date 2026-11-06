@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from playground.common import load_policy, make_env, parse_overrides, run_overrides
+from playground.common import load_policy, make_env, load_run, parse_overrides, run_overrides
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
@@ -50,7 +50,7 @@ for spike in (0.2, 0.4, 0.6):
 with launch_simulation(sim_utils.SimulationCfg(), args):
     from playground.snowboard.env import SnowboardEnv, SnowboardEnvCfg
 
-    run = yaml.safe_load((args.run / "run.yaml").read_text())
+    run = load_run(args.run)
     ov = run_overrides(run)
     ov |= {"carve_start": True, "edge_cmd_hold": True, "carve_start_toe_frac": 1.0, "rsi_frac": 0.0,
            "episode_length_s": args.hold + args.switch + 5, "start_heading_deg": 0.0}

@@ -32,7 +32,6 @@ from .snow import SnowParams, air_drag, board_wrench, snow_wrench
 GRAVITY = 9.81
 POLICY_HZ = 30
 DEFAULT_SLOPE_DEG = 9.0  # the demo's stage 3 slope
-STANCE_DIR = physical.ROOT / "envs/assets/stances"
 KEY_BODIES = ["right_hand", "left_hand", "right_foot", "left_foot"]
 STOCK_JOINTS = 28
 AMP_OBS_EXTRA = 25  # root height, tangent/normal, root velocities, key body offsets
@@ -46,7 +45,7 @@ IDENTITY_XYZW = (0.0, 0.0, 0.0, 1.0)
 def stance_file(binding_angles: tuple[float, float] | None = None, tag: str = ""):
     front, back = binding_angles if binding_angles is not None else physical.load()["rider"]["binding_angles_deg"]
     suffix = f"_{tag}" if tag else ""
-    return STANCE_DIR / f"stance_{front:g}_{back:g}{suffix}.yaml"
+    return physical.stance_path(f"stance_{front:g}_{back:g}{suffix}.yaml")
 
 
 def load_stance(binding_angles: tuple[float, float] | None = None, tag: str = "") -> dict:

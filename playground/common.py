@@ -1,5 +1,6 @@
 """Run folders, --set overrides, the train loop and policy loading. Importable before Isaac Sim launches."""
 
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -93,7 +94,26 @@ def new_run(args, task: str, cfg_dir: Path = CFG_DIR, log_root: Path = LOG_ROOT,
         "timesteps": args.timesteps or agent_cfg["timesteps"],
     }
     (run_dir / "run.yaml").write_text(yaml.safe_dump(run, sort_keys=False))
+    shutil.copy(cfg_dir / f"{args.algo}.yaml", run_dir)
     return run_dir, run, agent_cfg
+
+
+def save_world(run_dir: Path, cfg):
+    """Copy the physical facts and the stance pose the run rides into its folder, next to run.yaml and ppo.yaml, so
+    the run replays without the repo's current files. Call once the env is built."""
+    from envs import physical
+    from envs.carve_env import configured_binding_angles, stance_file
+
+    shutil.copy(physical.PHYSICAL_YAML, run_dir / "physical.yaml")
+    shutil.copy(stance_file(configured_binding_angles(cfg), cfg.stance_tag), run_dir)
+
+
+def load_run(run_dir: Path) -> dict:
+    """A run's run.yaml; later env builds read the run's own physical.yaml and stance file, where it has them."""
+    from envs import physical
+
+    physical.use(run_dir)
+    return yaml.safe_load((Path(run_dir) / "run.yaml").read_text())
 
 
 def run_settings(stage: str | None, pairs: list[str]) -> dict:
@@ -189,7 +209,8 @@ def load_policy(raw_env, run: dict, run_dir: Path, checkpoint: str, cfg_dir: Pat
     from skrl.utils.runner.torch import Runner
 
     env = SkrlVecEnvWrapper(raw_env)
-    agent_cfg = load_agent_cfg(run["algo"], cfg_dir)
+    own = (run_dir / f"{run['algo']}.yaml").exists()
+    agent_cfg = load_agent_cfg(run["algo"], run_dir if own else cfg_dir)
     agent_cfg["agent"]["experiment"] = {"write_interval": 0, "checkpoint_interval": 0}
     agent_cfg["trainer"]["close_environment_at_exit"] = False
     agent = Runner(env, agent_cfg).agent

@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from playground.common import load_policy, make_env, parse_overrides, run_overrides
+from playground.common import load_policy, make_env, load_run, parse_overrides, run_overrides
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
@@ -48,7 +48,7 @@ with launch_simulation(sim_cfg, args):
 
     from playground.snowboard.env import SnowboardEnv, SnowboardEnvCfg
 
-    run = yaml.safe_load((args.run / "run.yaml").read_text())
+    run = load_run(args.run)
     for viz in sim_cfg.visualizer_cfgs or []:
         if hasattr(viz, "window_width"):
             viz.window_width, viz.window_height = args.width, args.height
