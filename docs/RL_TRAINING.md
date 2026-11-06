@@ -241,13 +241,19 @@ toe peak. Without them every episode started tall, the only pose the policy had 
 |  | Processing | Sample | 30 | $`a \sim \mathcal{N}(\mu, \sigma^2)`$ | Raw Gaussian sample, continuous (not binned); clipped to $`[-1, 1]`$ |
 |  |  | Smoothing | 30 | $`\tilde a_t = 0.65\,\tilde a_{t-1} + 0.35\,a_t`$ | EMA on the new action, stops chatter |
 |  |  | Joint target | 28 | $`q^\ast`$ | Stance + scaled residual + synergy terms, clipped to the joint limits; held by the PD drives ([humanoid model §5](HUMANOID_MODEL.md#5-actions--joint-targets)) |
-| **Fall** |  | Torso tilt |  | $`\phi_{\mathrm{torso}} > 95^\circ`$ | `lying_deg`; a toe carve bows the torso 55–70° |
-|  |  | Pelvis above the board |  | $`h_{\mathrm{pelvis,board}} < 0.12`$ m | Sitting on the board |
-|  |  | Pelvis above the snow |  | $`h_{\mathrm{pelvis,snow}} < 0.15`$ m | Down on the snow |
-|  |  | Edge angle |  | $`\lvert\theta\rvert > 85^\circ`$ | Board on its side |
-|  |  | Tail first |  | $`\lvert\beta\rvert > 100^\circ`$ and $`v > 2`$ m/s | Riding backwards |
-| **Fence** |  | Position |  | $`\lvert y\rvert > W = 20`$ m | Board past the fence across the slope; ends the episode like a fall |
-| **Time-out** |  | Episode length |  | $`t > T_{\mathrm{ep}}`$ | 10 s (stage 2), 20 s (stages 3–4); the value is bootstrapped through it |
+
+The episode ends on one of three conditions. They are not policy inputs or outputs: the env checks them every step and
+resets that rider on its own (2048 riders reset independently).
+
+| Ends as | Condition | Notation | Content | Effect |
+|---|---|---|---|---|
+| **Fall** (terminated) | Torso tilt | $`\phi_{\mathrm{torso}} > 95^\circ`$ | `lying_deg`; a toe carve bows the torso 55–70° | −50 once, return ends |
+| | Pelvis above the board | $`h_{\mathrm{pelvis,board}} < 0.12`$ m | Sitting on the board | |
+| | Pelvis above the snow | $`h_{\mathrm{pelvis,snow}} < 0.15`$ m | Down on the snow | |
+| | Edge angle | $`\lvert\theta\rvert > 85^\circ`$ | Board on its side | |
+| | Tail first | $`\lvert\beta\rvert > 100^\circ`$ and $`v > 2`$ m/s | Riding backwards | |
+| **Fence** (terminated) | Position | $`\lvert y\rvert > W = 20`$ m | Board past the fence across the slope | Same as a fall |
+| **Time-out** (truncated) | Episode length | $`t > T_{\mathrm{ep}}`$ | 10 s (stage 2), 20 s (stages 3–4) | No penalty, value bootstrapped through it |
 
 ### From observation to joint targets
 
