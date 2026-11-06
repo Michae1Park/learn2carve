@@ -234,6 +234,30 @@ $$r_t = \Delta t\Big[\,30\,g_e + 20\,g_s + 10\,g_p + 30\,g_r - 10\,g_t + 10\,g_h
 | $g_t$ | Tilt | $\mathrm{clip}\big((\text{torso tilt} - 50°)/20°,\,0,\,1\big)$ |
 | $g_h$ | Hand grab | $\mathrm{clip}(1 - d/1.2\ \mathrm{m},\,0,\,1)$ while on a heel or toe turn, else 0 |
 
+**Sampling.** PhysX does not sample anything; it is the simulator that turns each action into the next state. The
+randomness in the data comes from two places:
+
+| Source | What is drawn |
+|---|---|
+| **The policy** | Each step, $a_t \sim \mathcal{N}(\mu_\theta(s_t), \sigma^2)$, drawn by skrl's Gaussian policy model (a `torch.distributions.Normal` over the network's mean and the learned $\log\sigma$). The noise is the exploration; $\log\pi(a_t \mid s_t)$ is stored for the ratio $\rho_t$ |
+| **The env, at each reset** | Start speed (4–5.5 m/s) and heading (±20°), start edge side, the command's phase and period (±15%), the first edge side in heading mode, and with probability `rsi_frac` a recorded state (§2) |
+
+Everything between the draws is deterministic physics. The loop for one env:
+
+1. skrl draws $a_t$ from the policy at 30 Hz. The env clips it to $[-1, 1]$, smooths it (EMA 0.35) and turns it into joint targets.
+2. PhysX holds those targets with PD drives for 4 substeps at 120 Hz; the [snow model](SNOW_MODEL.md) adds glide, steering and grip forces at each substep.
+3. The env returns $s_{t+1}$ and $r_t$ at the end of the 4 substeps.
+
+The log-probability is taken on the **raw** Gaussian sample, and the raw sample is what the rollout stores: skrl's
+action clipping is off, so the clamp to $[-1, 1]$ happens in the env and is part of the dynamics PPO sees, not of the
+policy's distribution. Past the clamp, extra noise changes nothing, which is how $\sigma$ grew to ~6 before it was capped.
+
+All 2048 riders step together in one batched GPU simulation, so a rollout of 48 steps is 98k transitions from 2048
+different situations. Each rider resets on its own when it falls, crosses a fence or times out, so a batch mixes riders
+at every point of an episode (a fresh start next to a rider mid-switch) and the data is close to independent between
+steps. A time-out is not a failure: the value is bootstrapped through it. A fall ends the return, which is what the
+−50 prices. At evaluation the noise is switched off and the rider takes the mean action $\mu_\theta(s_t)$.
+
 **Advantage (GAE).** Over each 48-step rollout, with the critic $V$, $\gamma = 0.995$ and $\lambda = 0.98$:
 
 $$\delta_t = r_t + \gamma\,(1 - d_t)\,V(s_{t+1}) - V(s_t) \qquad \hat A_t = \sum_{l \ge 0} (\gamma\lambda)^l\,\delta_{t+l} \qquad \hat R_t = \hat A_t + V(s_t)$$
