@@ -7,30 +7,10 @@ motion data. SI units; angles in ° unless marked rad.
 
 ![Training loop: policy at 30 Hz, PD joints, snow model and PhysX at 120 Hz, rewards, PPO update every 48 steps](rider/training_loop.svg)
 
-**Settings** (all SI units, angles in °):
-
-| File | Holds |
-|---|---|
-| `envs/physical.yaml` | Physical facts: rider size, stance, board, snow, piste width (stance pose: `envs/assets/stances/`) |
-| **`playground/snowboard/env.yaml`** | **Every training knob, with its default and a comment:** hill, starts, falls, edge command, curriculum, recorded-state starts, rider options, actions, reward. The defaults are the stage 3 setup |
-| `playground/snowboard/stages/stage{2,3,4}.yaml` | Only what each stage changes from `env.yaml` |
-| `playground/snowboard/ppo.yaml` | PPO and the networks |
-
-```bash
-scripts/py playground/snowboard/train.py --stage stage2                      # train a stage
-scripts/py playground/snowboard/train.py --stage stage2 --set slope_deg=8   # change one env.yaml key for this run
-```
-
-**A run folder is self-contained.** Training writes everything needed to rebuild the policy's world next to its
-checkpoints, and `play.py` and the diagnostics read those copies, not the repo's current files:
-
-| File | Holds |
-|---|---|
-| `run.yaml` | Every `env.yaml` setting as trained (`saved/` keeps only these; a fresh run also records rewards and steps) |
-| `physical.yaml` | Rider, board, snow, piste |
-| `stance_*.yaml` | The stance pose |
-| `ppo.yaml` | The policy network, needed to load the checkpoint |
-| `checkpoints/` | The trained weights |
+**One training step.** The env gives the rider a target edge angle $\theta^\ast$ (the *edge command*). The policy sees
+the body state and $\theta^\ast$, and outputs joint targets. The body tips the board, the [snow model](SNOW_MODEL.md)
+turns that edge into a turn, and the reward measures how close the edge came to $\theta^\ast$. PPO improves the policy
+from 2048 riders in parallel. The policy never steers or plans a path: the command is the planner, the body is the skill.
 
 ## 1. The task: follow the edge command
 
@@ -81,14 +61,13 @@ the course, stage 4 tightens the turns.
 
 | | **Stage 2: change edges** | **Stage 3: full S** | **Stage 4: tighter turns** |
 |---|---|---|---|
-| Stage file | `stages/stage2.yaml` (from scratch) | `stages/stage3.yaml`: the `env.yaml` defaults (warm-started from stage 2) | `stages/stage4.yaml` (warm-started from stage 3) |
 | Learns | Get from one edge to the other without falling | Link turns into an S that stays on the piste | End each turn sooner, without the overshoot |
 | Start | Already in a carve, balanced on an edge (80% toe), 4–5.5 m/s; 50% from recorded toe-carve states | Riding flat, heading within ±20° of the fall line, 4–5.5 m/s; 30% from recorded states | As stage 3 |
 | Edge command | **Timed**: heel ↔ toe, period $T$ 6 → 4 s | **Heading**: switch at 50° across the hill, centring shift up to 25° | Heading at **40°**, centring shift up to 10° |
 | Edge angle | ±15 → 30° | ±25 → 45° | As stage 3 |
 | Slope, episode | 7°, 10 s | 9°, 20 s | As stage 3 |
 | Speed | Starts 4–5.5 m/s | Free (eval mean 7.9 m/s): the steeper slope reaches the speed a 40°+ edge needs | As stage 3 |
-| Reward | Hand grab weight 5, Gaussian | `env.yaml` → `rewards` (grab weight 10, linear) | As stage 3 |
+| Reward | Hand grab weight 5, Gaussian | Hand grab weight 10, linear (§4) | As stage 3 |
 | Saved run | `saved/01_stage2_switches` | `saved/03_stage3_centred` | `saved/04_stage3_tighter` |
 
 **No hold-only stage.** An earlier stage 1 trained only to hold a carve; stage 2 warm-started from it never learned
@@ -123,17 +102,17 @@ Each step, with $\Delta t = 1/30$ s and the edge error $e = \theta - \theta^\ast
 
 $$r = \Delta t \sum_i w_i r_i + w_{\mathrm{fall}}\ \mathbb{1}[\text{fall or fence}]$$
 
-Weights $w_i$ are those of stage 3, from `env.yaml` → `rewards`; the field names are the keys there.
+Weights $w_i$ are those of stage 3.
 
-| Term (`env.yaml` key) | $r_i$ | $w_i$ |
+| Term | $r_i$ | $w_i$ |
 |---|---|---|
-| **Edge command** (`edge_cmd`) | $e^{-(e/\sigma)^2}$, $\sigma$ = 30°, × 0 while the board is flat (edge < 10°, full from 20°): a flat board never pays | 30 |
-| **Edge side** (`edge_side`) | +1 on the commanded side, −1 on the other (command > 10°, edge > 3°): starting the switch pays before the angle matches | 20 |
-| **Pose reference** (`pose_ref`) | Legs lean past the edge, centre of mass lean less (angulation), from the pendulum model (formula below); 0 near flat | 10 |
-| **Rise** (`rise`) | While the command is within 8° of flat: clip((pelvis height − 0.35 m) / 0.2 m), i.e. come up through the edge change | 30 |
-| **Tilt** (`tilt`) | clip((torso tilt − 50°) / 20°): a bow past ~65° can't get back to the heel | −10 |
-| **Hand grab** (`grab`) | clip(1 − $d$ / 1.2 m), $d$ the inside hand to its grab point (below). Counter-angulation for higher edges | 10 |
-| **Fall** (`fall`) | Once, a fall or a fence | −50 |
+| **Edge command** | $e^{-(e/\sigma)^2}$, $\sigma$ = 30°, × 0 while the board is flat (edge < 10°, full from 20°): a flat board never pays | 30 |
+| **Edge side** | +1 on the commanded side, −1 on the other (command > 10°, edge > 3°): starting the switch pays before the angle matches | 20 |
+| **Pose reference** | Legs lean past the edge, centre of mass lean less (angulation), from the pendulum model (formula below); 0 near flat | 10 |
+| **Rise** | While the command is within 8° of flat: clip((pelvis height − 0.35 m) / 0.2 m), i.e. come up through the edge change | 30 |
+| **Tilt** | clip((torso tilt − 50°) / 20°): a bow past ~65° can't get back to the heel | −10 |
+| **Hand grab** | clip(1 − $d$ / 1.2 m), $d$ the inside hand to its grab point (below). Counter-angulation for higher edges | 10 |
+| **Fall** | Once, a fall or a fence | −50 |
 
 **Pose reference.** With $\phi_{\mathrm{legs}}$ and $\phi_{\mathrm{CoM}}$ the lean of the pelvis and of the rider's
 centre of mass from the board, in its roll plane:
@@ -169,21 +148,21 @@ Nothing rewards speed, staying alive, posture or style: survival pays only throu
 | Envs | 2048 in parallel |
 | Rollout | 48 steps (1.6 s, an edge change fits) × 2048 = **98k samples per update** |
 | Update | 5 epochs × 8 mini-batches |
-| Training | `timesteps` in `ppo.yaml` (12 000 per env = 250 updates; `--timesteps` overrides). The saved runs used 16 000 (~26 min on one GPU) |
+| Training | 16 000 steps per env per run (~26 min on one GPU) |
 | Networks | Policy and value: separate MLPs, 512-256-128, ELU |
 | Policy | Gaussian, initial std $e^{-1}$, capped at $e^{-0.3}$ (it had grown to ~6 against clipped actions) |
 | Discount, GAE | $\gamma$ = 0.995 (~6.7 s, more than one S), $\lambda$ = 0.98 |
 | Learning rate | $10^{-3}$, KL-adaptive (target KL 0.01) |
 | Clipping | Ratio 0.2, value 0.2, grad norm 1.0 |
 | Entropy bonus | 0.003 |
-| Warm start | `--init_from <run or saved/ folder>`; the exploration noise is reset |
+| Warm start | Each stage starts from the previous stage's weights; the exploration noise is reset |
 
 ## 6. Evaluation (`playground/snowboard/play.py`)
 
 A deterministic policy (mean action) rides fixed runs: piste centre, straight down, 100 m long, no recorded-state
 starts, and the edge command held at the level training ended on (`edge_cmd_level_init=1`, `edge_cmd_level_fixed`).
 Each run prints one line of stats; the longest is saved as `trail.png` + `ride.csv` (edge, command, slip, torso tilt,
-pelvis height per step). `--record DIR` films it for the README.
+pelvis height per step). 
 
 **Diagnostics:**
 
@@ -216,11 +195,7 @@ briefly through each edge change.
 
 The overshoot is the heading switch firing late: the edge command only flips once $\psi$ passes the switch heading,
 and the board keeps swinging while the command ramps through flat. Switching earlier ends the turn nearer the target.
-Stage 4 (`stages/stage4.yaml`) does this, warm-started from stage 3:
-
-```bash
-scripts/py playground/snowboard/train.py --stage stage4 --init_from saved/03_stage3_centred
-```
+Stage 4 does this, warm-started from stage 3:
 
 | Setting | Stage 3 | Stage 4 | Effect |
 |---|---|---|---|
