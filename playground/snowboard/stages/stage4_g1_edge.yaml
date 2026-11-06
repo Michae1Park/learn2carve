@@ -1,0 +1,14 @@
+# G1 edge push (warm-started from a G1 stage 3 policy on Unitree gains): command deeper edges so the carve holds
+# 40°+ (the stage 3 command peaks at 45°, and the rider averaged ~34°). Use with --set robot=g1 --init_from <run>.
+# Same 60/50 setup as stage3_g1_6050_unitree.
+
+env:
+  binding_angles_deg: [60, 50]
+  g1_gains: unitree
+  arm_action_scale: 0.5
+  free_action_scale: {}
+  synergy_edge_rad: {left_knee_joint: 0.5, right_knee_joint: 0.5, left_ankle_pitch_joint: -0.3, right_ankle_pitch_joint: -0.3}
+  edge_cmd_amp_deg: [35, 55]    # amplitude at curriculum level 0 → 1 (stage 3: [25, 45])
+  edge_cmd_level_init: 0.5      # the stage 3 policy already tracks 45°: start halfway (45°)
+
+rewards: {}
