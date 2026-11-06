@@ -14,16 +14,17 @@ follows what failed when it was tried all at once.
 | Stage | The rider learns to | Why this order |
 |---|---|---|
 | 1. Hold a carve | Balance on one edge | Dropped: the policy that held an edge never learned to leave it |
-| **2. Change edges** | Flip from the toe edge to the heel edge and back, again and again, without falling | The hard move, and the one every later stage reuses |
-| **3. Full S** | Link the flips into an S, with the edge change triggered by the turn itself, and stay between the fences | A timer ignores where the board is and drifts into a fence |
+| **2. Change edges** | Flip from the toe edge to the heel edge and back, again and again, without falling. The flips come on a fixed clock, one every 2–3 s | The hard move, and the one every later stage reuses |
+| **3. Full S** | Link the flips into an S, with the edge change triggered by the turn itself, and stay between the fences | Stage 2's fixed clock ignores where the board is, so the rider drifts into a fence. Here the turn itself decides when to flip |
 | **4. Tighter turns** | End each turn sooner, without the overshoot | Stage 3's turns swing past their target |
 
 Details and results per stage: [§2](#2-stages).
 
 ### What a good carve looks like
 
-A carve is the board following the arc of its own sidecut, with no sideways skid. Its signature is a **high edge angle**
-(the board rolled well over onto its edge) with almost no **slip**, which draws a thin line in the snow.
+A carve is the board following the arc of its own sidecut, with no sideways skid. You can recognize it by a **high edge angle**
+(the board rolled well over onto its edge) with almost no **slip** (the board points where it travels), which draws a
+thin line in the snow.
 
 | | Skidded turn | Carved turn | Trained rider |
 |---|---|---|---|
