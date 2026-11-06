@@ -206,6 +206,10 @@ toe peak. Without them every episode started tall, the only pose the policy had 
 
 ![One policy step: observation, MLP, Gaussian sample, clip and smooth, joint targets, PD drives](rider/policy_path.svg)
 
+### What the policy sees and does
+
+The 140 numbers the network reads, the 30 numbers it outputs, and the processing that turns them into joint targets:
+
 | | Group | Part | Size | Notation | Content |
 |---|---|---|---|---|---|
 | **Observation** (140) | Humanoid | Joint positions | 30 | $`q \in \mathbb{R}^{30}`$ | All joints (28 driven + 2 passive) |
@@ -244,7 +248,9 @@ toe peak. Without them every episode started tall, the only pose the policy had 
 |  |  | Smoothing | 30 | $`\tilde a_t = 0.65\,\tilde a_{t-1} + 0.35\,a_t`$ | Env: EMA on the new action, stops chatter |
 |  |  | Joint target | 28 | $`q^\ast`$ | Env: stance pose + the smoothed action mapped to joint angles, clipped to the joint limits (equation below); held by the PD drives ([humanoid model §5](HUMANOID_MODEL.md#5-actions--joint-targets)) |
 
-**From the smoothed action to a joint target.** The smoothed action has 30 components: 28 joint residuals
+#### From the smoothed action to a joint target
+
+The smoothed action has 30 components: 28 joint residuals
 $`\tilde a_j`$ and 2 synergies $`\tilde s_0, \tilde s_1`$. Each joint's target is its stance angle, plus a scaled
 residual, plus the synergy terms, clipped to the joint limits:
 
@@ -260,6 +266,8 @@ $$q^\ast_j = \mathrm{clip}\Big(q^{\mathrm{stance}}_j \;+\; \underbrace{c_j\,\tfr
 
 Every $`\rho`$ is zero for the joints it does not list. Example: $`\tilde s_0 = +1`$ bends the knees by 0.6 + 0.4 = 1.0 rad
 and pitches the hips by −0.3 rad; the ankle term (+0.5 rad) is clipped to the boots' range (−5° to +15°).
+
+### When an episode ends
 
 The episode ends on one of three conditions. They are not policy inputs or outputs: the env checks them every step and
 resets that rider on its own (2048 riders reset independently).
@@ -277,7 +285,7 @@ resets that rider on its own (2048 riders reset independently).
 How each ending enters the return (the −50 on a fall or fence, the bootstrap through a time-out) is in
 [§5](#the-training-loop-in-plain-words).
 
-### Rates
+### Rates: policy, physics and smoothing
 
 | Granularity | |
 |---|---|
