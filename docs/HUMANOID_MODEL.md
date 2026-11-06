@@ -88,11 +88,11 @@ Stance files are named by binding angles, `stance_<front>_<back>[_<tag>].yaml`.
 The demo policy has **30 actions**: 2 synergy actions + 28 joint residuals (26 joints + 2 knee flexions; the knee
 twist and the boots' stance are left to their drives). Targets add up as
 
-$$q^* = \mathrm{clip}\!\left(q^{\text{stance}} + 0.3 \cdot 0.5 \cdot \tfrac{1}{2}(q^{\max} - q^{\min}) \cdot a_j + \textstyle\sum_k s_k\,\rho_k + \text{toe}(s_0),\ q^{\min},\ q^{\max}\right)$$
+$$q^* = \mathrm{clip}\!\left(q^{\text{stance}} + 0.3 \cdot 0.25 \cdot \tfrac{1}{2}(q^{\max} - q^{\min}) \cdot a_j + \textstyle\sum_k s_k\,\rho_k + \text{toe}(s_0),\ q^{\min},\ q^{\max}\right)$$
 
 | Term | Value |
 |---|---|
-| Joint residual $a_j \in [-1, 1]$ | $\pm15\%$ of each joint's half-range (action scale 0.5 × synergy residual 0.3); **arms ±50%** (`arm_action_scale=0.5`, no residual factor) |
+| Joint residual $a_j \in [-1, 1]$ | $\pm7.5\%$ of each joint's half-range (action scale 0.25 × synergy residual 0.3); **arms ±50%** (`arm_action_scale=0.5`, no residual factor) |
 | Edge synergy $s_0$ | Both ankle flex +0.5 rad and both knees +0.6 rad per unit: one number rolls the board onto its edge (+1 toe). With boots the ankle part is clipped to the boots' −5…+15°, so the knees do most of it |
 | Lean synergy $s_1$ | Abdomen side-bend 0.9 rad per unit (counter-angulation) |
 | Toe extra | For $s_0 > 0$ also knees +0.4 rad and hips pitch −0.3 rad per unit: the toe edge comes from a squat |

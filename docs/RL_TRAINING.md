@@ -229,18 +229,37 @@ toe peak. Without them every episode started tall, the only pose the policy had 
 |  |  | Turn state | 3 | side, swing, $`t_{\mathrm{turn}}`$ | Current turn side, its largest $`\lvert\psi\rvert`$ so far, time since the last turn (clipped at 10 s, ÷ 5) |
 |  |  | Edge command | 3 | $`\theta^\ast(t),\ \theta^\ast(t{+}0.3),\ \theta^\ast(t{+}0.6)`$ | Now and 0.3 s, 0.6 s ahead |
 |  |  | Unused | 4 | 0 | Kept so saved policies load |
-| **Action** (30) | Synergy | Edge | 1 | $`s_0`$ | Ankles and knees together, +1 toward the toe edge, −1 toward the heel |
-|  |  | Lean | 1 | $`s_1`$ | Abdomen side-bend (counter-angulation) |
-|  | Joint residuals (28) | Abdomen | 3 | $`a^{\mathrm{abd}}`$ | Spine twist, side-bend, bow; ±15% of the half-range |
-|  |  | Neck | 3 | $`a^{\mathrm{neck}}`$ | ±15% |
-|  |  | Hips | 6 | $`a^{\mathrm{hip}}`$ | 3 per leg; ±15% |
-|  |  | Knees | 2 | $`a^{\mathrm{knee}}`$ | Flexion only (the twist is passive); ±15% |
-|  |  | Ankles | 6 | $`a^{\mathrm{ankle}}`$ | 3 per foot; ±15%, clipped to the boots' range |
-|  |  | Shoulders | 6 | $`a^{\mathrm{sh}}`$ | 3 per arm; **±50%** (the arms reach for the hand grab) |
-|  |  | Elbows | 2 | $`a^{\mathrm{elb}}`$ | **±50%** |
-|  | Processing | Sample | 30 | $`a \sim \mathcal{N}(\mu, \sigma^2)`$ | Raw Gaussian sample, continuous (not binned); clipped to $`[-1, 1]`$ |
-|  |  | Smoothing | 30 | $`\tilde a_t = 0.65\,\tilde a_{t-1} + 0.35\,a_t`$ | EMA on the new action, stops chatter |
-|  |  | Joint target | 28 | $`q^\ast`$ | Stance + scaled residual + synergy terms, clipped to the joint limits; held by the PD drives ([humanoid model §5](HUMANOID_MODEL.md#5-actions--joint-targets)) |
+| **Action** (30) | Synergy | Edge | 1 | $`\mu^{s_0} \to s_0`$ | Ankles and knees together, +1 toward the toe edge, −1 toward the heel |
+|  |  | Lean | 1 | $`\mu^{s_1} \to s_1`$ | Abdomen side-bend (counter-angulation) |
+|  | Joint residuals (28) | Abdomen | 3 | $`\mu^{\mathrm{abd}} \to a^{\mathrm{abd}}`$ | Spine twist, side-bend, bow; ±7.5% of the half-range |
+|  |  | Neck | 3 | $`\mu^{\mathrm{neck}} \to a^{\mathrm{neck}}`$ | ±7.5% |
+|  |  | Hips | 6 | $`\mu^{\mathrm{hip}} \to a^{\mathrm{hip}}`$ | 3 per leg; ±7.5% |
+|  |  | Knees | 2 | $`\mu^{\mathrm{knee}} \to a^{\mathrm{knee}}`$ | Flexion only (the twist is passive); ±7.5% |
+|  |  | Ankles | 6 | $`\mu^{\mathrm{ankle}} \to a^{\mathrm{ankle}}`$ | 3 per foot; ±7.5%, clipped to the boots' range |
+|  |  | Shoulders | 6 | $`\mu^{\mathrm{sh}} \to a^{\mathrm{sh}}`$ | 3 per arm; **±50%** (the arms reach for the hand grab) |
+|  |  | Elbows | 2 | $`\mu^{\mathrm{elb}} \to a^{\mathrm{elb}}`$ | **±50%** |
+|  | Processing (not network outputs) | Std | 30 | $`\sigma = e^{\log\sigma}`$ | A learned parameter, not computed by the network: one number per action, the same in every state. Starts at 0.37, capped at 0.74, learned by gradient descent ([§5](#how-the-exploration-noise-σ-is-learned)) |
+|  |  | Sample | 30 | $`a \sim \mathcal{N}(\mu, \sigma^2)`$ | Drawn by skrl: raw Gaussian sample around the network's means; continuous (not binned) |
+|  |  | Clip | 30 | $`a \leftarrow \mathrm{clip}(a, -1, 1)`$ | Env: keeps every component in range |
+|  |  | Smoothing | 30 | $`\tilde a_t = 0.65\,\tilde a_{t-1} + 0.35\,a_t`$ | Env: EMA on the new action, stops chatter |
+|  |  | Joint target | 28 | $`q^\ast`$ | Env: stance pose + the smoothed action mapped to joint angles, clipped to the joint limits (equation below); held by the PD drives ([humanoid model §5](HUMANOID_MODEL.md#5-actions--joint-targets)) |
+
+**From the smoothed action to a joint target.** The smoothed action has 30 components: 28 joint residuals
+$`\tilde a_j`$ and 2 synergies $`\tilde s_0, \tilde s_1`$. Each joint's target is its stance angle, plus a scaled
+residual, plus the synergy terms, clipped to the joint limits:
+
+$$q^\ast_j = \mathrm{clip}\Big(q^{\mathrm{stance}}_j \;+\; \underbrace{c_j\,\tfrac12\big(q^{\max}_j - q^{\min}_j\big)\,\tilde a_j}_{\text{joint residual}} \;+\; \underbrace{\tilde s_0\,\rho^{\mathrm{edge}}_j + \tilde s_1\,\rho^{\mathrm{lean}}_j}_{\text{synergies}} \;+\; \underbrace{[\tilde s_0]_+\,\rho^{\mathrm{toe}}_j}_{\text{toe extra}},\ \ q^{\min}_j,\ q^{\max}_j\Big)$$
+
+| Term | Meaning |
+|---|---|
+| $`q^{\mathrm{stance}}_j`$ | The base position: zero action holds this pose ([humanoid model §4](HUMANOID_MODEL.md#4-stance-scriptsmake_stancepy)) |
+| $`c_j`$ | Residual scale: $`0.3 \times 0.25 = 0.075`$ for the body joints (±7.5% of the half-range), **0.5** for the shoulders and elbows (±50%), so the arms can reach for the hand grab |
+| $`\rho^{\mathrm{edge}}`$ | Per unit of $`\tilde s_0`$: ankles +0.5 rad, knees +0.6 rad. One number rolls the board onto its edge (+1 toe, −1 heel) |
+| $`\rho^{\mathrm{lean}}`$ | Per unit of $`\tilde s_1`$: abdomen side-bend +0.9 rad (counter-angulation) |
+| $`\rho^{\mathrm{toe}}`$ | Only when $`\tilde s_0 > 0`$ ($`[x]_+ = \max(x, 0)`$), per unit: knees +0.4 rad, hip pitch −0.3 rad. The toe edge comes from a squat |
+
+Every $`\rho`$ is zero for the joints it does not list. Example: $`\tilde s_0 = +1`$ bends the knees by 0.6 + 0.4 = 1.0 rad
+and pitches the hips by −0.3 rad; the ankle term (+0.5 rad) is clipped to the boots' range (−5° to +15°).
 
 The episode ends on one of three conditions. They are not policy inputs or outputs: the env checks them every step and
 resets that rider on its own (2048 riders reset independently).
@@ -341,11 +360,17 @@ what happened gives each transition its advantage $`\hat A_t`$ and a regression 
 
 $$\hat A_t \approx \underbrace{r_t + \gamma V(s_{t+1})}_{\text{what happened}} - \underbrace{V(s_t)}_{\text{what was expected}}$$
 
-**3. Learn (backprop).** 5 epochs over the buffer, each split into 8 mini-batches of ~12k transitions: 40 gradient
-steps. Each step computes the loss $`\mathcal{L}`$ (Loss, below) on one mini-batch and updates every trainable number,
-the policy weights, the value weights and $`\log\sigma`$:
+**3. Learn (backprop).** The 98k transitions are pooled and shuffled, so rider and time order are gone, then split
+into 8 mini-batches of ~12k. A mini-batch is a random slice of transitions, not 8 riders. One pass over all 8 is an
+**epoch** (8 gradient steps); the buffer is reshuffled and swept again, 5 epochs in all: 40 gradient steps. Each step
+computes the loss $`\mathcal{L}`$ (Loss, below) on one mini-batch and updates every trainable number, the policy
+weights, the value weights and $`\log\sigma`$:
 
 $$\theta \leftarrow \mathrm{Adam}\big(\theta,\ \nabla_\theta \mathcal{L}\big)$$
+
+The advantages of step 2 are computed once, on the time-ordered buffer, before the first epoch and not recomputed per
+epoch. That is why shuffling is safe: each transition already carries its $`\hat A_t`$ and $`\hat R_t`$. The 40 steps
+are unrelated to the 30 Hz policy rate and the 48-step rollout: they are `epochs × mini-batches`, set separately.
 
 **4. Discard and repeat.** The buffer was generated by $`\theta_{\mathrm{old}}`$ and is no longer typical of the improved
 policy, so it is thrown away and step 1 runs again with the new weights. A run of 16 000 steps per env is
@@ -469,8 +494,8 @@ gradient.
 
 ### One update
 
-48 steps × 2048 envs = 98k samples, split into 8 mini-batches of ~12k and swept 5 times: 40 gradient
-steps on each batch, then the batch is thrown away (on-policy). After each epoch the mean KL between old and new
+48 steps × 2048 envs = 98k samples, shuffled and split into 8 mini-batches of ~12k, swept 5 times (reshuffled each
+epoch): 40 gradient steps in total on the one buffer, then it is thrown away (on-policy). After each epoch the mean KL between old and new
 policy sets Adam's learning rate: it is divided by 1.5 when the KL goes above twice the 0.01 target and multiplied by
 1.5 when it falls below half.
 
