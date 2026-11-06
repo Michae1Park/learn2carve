@@ -3,7 +3,7 @@
     scripts/py playground/snowboard/play.py logs/playground/snowboard/<run>
     scripts/py playground/snowboard/play.py <run> --livestream 2 --seconds 120
     scripts/py playground/snowboard/play.py <run> --livestream 2 --follow    # camera tracks the rider
-    scripts/py playground/snowboard/play.py --no_policy --task sideslip      # stance held, zero actions
+    scripts/py playground/snowboard/play.py --no_policy                      # stance held, zero actions
 
 Play is a series of identical runs (piste centre, straight down, mid-range speed command), each --run_length
 metres long. One line is printed per run of env 0; the longest run's track goes to <run>/trail.png and its
@@ -18,20 +18,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from playground.common import (DEFAULT_CHECKPOINT, LOG_ROOT, add_suppress_arg, load_policy, make_env,
-                               parse_overrides)
+                               parse_overrides, run_overrides)
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
 HERE = Path(__file__).resolve().parent
-TASKS = ["sideslip", "skid", "carve"]
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument("run", type=Path, nargs="?", help="run directory from train.py")
 parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT, help="file in <run>/checkpoints/")
 parser.add_argument("--no_policy", action="store_true", help="hold the stance (zero actions) instead of a policy")
-parser.add_argument("--task", choices=TASKS, default=None, help="default: the run's task")
 parser.add_argument("--seconds", type=float, default=60.0, help="total play time")
-parser.add_argument("--run_length", type=float, default=None, help="one run [m]; default 100 (side slip 25)")
+parser.add_argument("--run_length", type=float, default=None, help="one run [m]; default 100")
 parser.add_argument("--cam_x", type=float, default=None,
                     help="camera distance down the run from the start [m]; default: just past where a run ends")
 parser.add_argument("--focal", type=float, default=35.0, help="camera focal length [mm]")
@@ -39,7 +37,7 @@ parser.add_argument("--num_envs", type=int, default=1)
 parser.add_argument("--follow", action="store_true", help="camera tracks the rider (default: free camera)")
 parser.add_argument("--record", type=Path, default=None, metavar="DIR",
                     help="film one run with two follow cameras -> DIR/front.gif, DIR/top.gif; needs --enable_cameras")
-parser.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE", help="env cfg overrides on top of the run's")
+parser.add_argument("--set", nargs="*", action="extend", default=[], metavar="KEY=VALUE", help="env cfg overrides on top of the run's")
 add_suppress_arg(parser)
 add_launcher_args(parser)
 args = parser.parse_args()
@@ -63,11 +61,11 @@ def env0(tensor: torch.Tensor) -> float:
 class RunStats:
     """Averages over one run of env 0, printed as one line."""
 
-    HEADER = "run  end    seconds  speed (cmd)  |edge|°  slip_err°  |heading|°  max|y|_m  turns  m/turn"
+    HEADER = "run  end    seconds  speed (cmd)  |edge|°  |slip|°  |heading|°  max|y|_m  turns  m/turn"
 
     def __init__(self):
         self.steps = 0
-        self.sums = dict.fromkeys(("speed", "edge", "slip_err", "heading"), 0.0)
+        self.sums = dict.fromkeys(("speed", "edge", "slip", "heading"), 0.0)
         self.max_y = 0.0
         self.x0 = self.x = 0.0
         self.turns = 0
@@ -86,10 +84,10 @@ class RunStats:
         edge_deg = math.degrees(env0(env.edge_angle()))
         self.sums["speed"] += speed
         self.sums["edge"] += abs(edge_deg)
-        self.sums["slip_err"] += abs(math.degrees(env0(env.slip_error())))
+        self.sums["slip"] += abs(math.degrees(env0(env.slip_angle())))
         self.sums["heading"] += abs(math.degrees(env0(env.path_heading())))
         self.max_y = max(self.max_y, abs(y))
-        command_deg = math.degrees(env0(env.edge_command())) if env.cfg.edge_cmd else 0.0
+        command_deg = math.degrees(env0(env.edge_command()))
         tilt_deg = math.degrees(env0(env.torso_incline()))
         self.rows.append((x, y, speed, math.degrees(env0(env.slip_angle())), edge_deg, command_deg, tilt_deg,
                           env0(env.pelvis_height())))
@@ -98,14 +96,13 @@ class RunStats:
         mean = {k: v / max(self.steps, 1) for k, v in self.sums.items()}
         per_turn = f"{(self.x - self.x0) / self.turns:6.1f}" if self.turns else "     -"
         return (f"{number:3d}  {end:5s}  {self.steps * step_dt:7.1f}  {mean['speed']:5.1f} ({self.v_cmd:4.1f})  "
-                f"{mean['edge']:6.1f}  {mean['slip_err']:9.1f}  {mean['heading']:10.1f}  {self.max_y:8.1f}  "
+                f"{mean['edge']:6.1f}  {mean['slip']:7.1f}  {mean['heading']:10.1f}  {self.max_y:8.1f}  "
                 f"{self.turns:5d}  {per_turn}")
 
 
 def main():
-    run = yaml.safe_load((args.run / "run.yaml").read_text()) if args.run else {"task": "sideslip", "overrides": {}}
-    task = args.task or run["task"]
-    trail_png = args.run / "trail.png" if args.run else LOG_ROOT / f"no_policy_{task}_trail.png"
+    run = yaml.safe_load((args.run / "run.yaml").read_text()) if args.run else {"overrides": {}}
+    trail_png = args.run / "trail.png" if args.run else LOG_ROOT / "no_policy_trail.png"
     trail_png.parent.mkdir(parents=True, exist_ok=True)
 
     sim_cfg = sim_utils.SimulationCfg()
@@ -114,11 +111,11 @@ def main():
         from playground.snowboard.env import SnowboardEnv, SnowboardEnvCfg
         from playground.snowboard.trail import SnowTrail
 
-        overrides, run_length = play_overrides(run["overrides"], SnowboardEnvCfg(task=task))
-        env_cfg = SnowboardEnvCfg(task=task)
+        overrides, run_length = play_overrides(run_overrides(run), SnowboardEnvCfg())
+        env_cfg = SnowboardEnvCfg()
         if args.record:
             Recorder.add_cameras(env_cfg)
-        raw_env = make_env(SnowboardEnv, env_cfg, overrides, args.num_envs, sim_cfg, args.suppress_warnings)
+        raw_env = make_env(SnowboardEnv, env_cfg, overrides, args.num_envs, sim_cfg, args.suppress_warnings, legacy=True)
         if args.no_policy:
             env, agent = raw_env, None
         else:
@@ -128,7 +125,7 @@ def main():
         board = config.load()["board"]
         trail = SnowTrail(board["length"], board["waist_width"], raw_env.q_slope)
 
-        print(f"\n[play] task={task}  {'no policy' if args.no_policy else args.run.name}  run {run_length:.0f} m, "
+        print(f"\n[play] {'no policy' if args.no_policy else args.run.name}  run {run_length:.0f} m, "
               f"speed command {env0(raw_env.v_cmd):.1f} m/s, fence ±{raw_env.cfg.fence_half_width:.0f} m")
         print(f"[play] {RunStats.HEADER}")
         recorder = Recorder(raw_env) if args.record else None
@@ -138,7 +135,7 @@ def main():
             recorder.save(args.record)
 
         trail.marks = longest_marks
-        trail.save_png(trail_png, f"{task}: {longest_seconds:.1f} s at {env0(raw_env.v_cmd):.1f} m/s commanded",
+        trail.save_png(trail_png, f"carve: {longest_seconds:.1f} s at {env0(raw_env.v_cmd):.1f} m/s commanded",
                        fence=raw_env.cfg.fence_half_width, x_end=run_length)
         print(f"[play] track of the longest episode ({longest_seconds:.1f} s) -> {trail_png}")
         env.close()
@@ -164,10 +161,9 @@ def play_overrides(run_overrides: dict, defaults) -> tuple[dict, float]:
         overrides["start_heading_deg"] = 0.0
     if "edge_cmd_level_init" not in user:
         overrides["edge_cmd_level_init"], overrides["edge_cmd_level_fixed"] = 1.0, True
-    overrides["guide_steps"] = 0
     overrides["rsi_frac"] = 0.0
 
-    run_length = args.run_length or (25.0 if defaults.task == "sideslip" else 100.0)
+    run_length = args.run_length or 100.0
     overrides["run_length"] = run_length
     overrides["episode_length_s"] = 60.0  # only catches a rider who stops
     if not args.follow:

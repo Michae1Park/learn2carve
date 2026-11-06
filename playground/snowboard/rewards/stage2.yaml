@@ -1,0 +1,17 @@
+# Stage 2 reward: change edges on a timer. Per-second weights (fall: once); terms in docs/RL_TRAINING.md §4.
+# Each key is a RewardsCfg field (playground/snowboard/env.py); override one with --set rewards.<key>=<value>.
+
+edge_cmd: 30              # track the commanded edge: exp(-(e/σ)²), 0 while the board is flat
+edge_cmd_sigma_deg: 30    # wide, so crossing flat toward the new edge already pays
+edge_side: 20             # +1 on the commanded side, -1 on the other: starting the switch pays
+pose_ref: 10              # legs and centre of mass lean as in the double pendulum (angulation)
+pose_ref_legs: 1.15       # legs lean = 1.15 × command
+pose_ref_com: 0.77        # COM lean = 0.77 × legs lean
+pose_ref_sigma_deg: 15
+rise: 30                  # come up through the edge change: pelvis height while the command is near flat
+tilt: -10                 # torso bowed past tilt_free_deg: a deep bow can't get back to the heel
+tilt_free_deg: 50
+grab: 5                   # inside hand toward its grab point on the board
+grab_sigma_m: 0.6         # Gaussian falloff
+grab_linear_m: 0          # 0: use the Gaussian
+fall: -50                 # once, a fall or a fence: more than 2 s of edge reward

@@ -33,9 +33,9 @@ import isaaclab.sim as sim_utils
 with launch_simulation(sim_utils.SimulationCfg(), args):
     from playground.snowboard.env import SnowboardEnv, SnowboardEnvCfg
 
-    ov = {"stance_tag": "squat3", "binding_angles_deg": (54, 45), "pelvis_mass_frac": 0.2, "guide_steps": 0,
+    ov = {"stance_tag": "squat3", "binding_angles_deg": (54, 45), "pelvis_mass_frac": 0.2,
           "slope_deg": args.slope, "start_heading_deg": 0.0} | parse_overrides(args.set)
-    probe = SnowboardEnvCfg(task="carve")
+    probe = SnowboardEnvCfg()
     names = None
     # one env per (joint, sign) + 1 reference at zero action
     raw = make_env(SnowboardEnv, probe, ov, 2 * 28 + 1, sim_utils.SimulationCfg(), "true")

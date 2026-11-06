@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from playground.common import load_policy, make_env, parse_overrides
+from playground.common import load_policy, make_env, parse_overrides, run_overrides
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
@@ -51,14 +51,14 @@ with launch_simulation(sim_utils.SimulationCfg(), args):
     from playground.snowboard.env import SnowboardEnv, SnowboardEnvCfg
 
     run = yaml.safe_load((args.run / "run.yaml").read_text())
-    ov = dict(run["overrides"])
+    ov = run_overrides(run)
     ov |= {"carve_start": True, "edge_cmd_hold": True, "carve_start_toe_frac": 1.0, "rsi_frac": 0.0,
-           "episode_length_s": args.hold + args.switch + 5, "guide_steps": 0, "start_heading_deg": 0.0}
+           "episode_length_s": args.hold + args.switch + 5, "start_heading_deg": 0.0}
     ov |= parse_overrides(args.set)
     if args.heel:
         ov["synergy_heel_rad"] = yaml.safe_load(args.heel)
     n = len(GROUPS) * args.reps
-    raw = make_env(SnowboardEnv, SnowboardEnvCfg(task=run["task"]), ov, n, sim_utils.SimulationCfg(), "true")
+    raw = make_env(SnowboardEnv, SnowboardEnvCfg(), ov, n, sim_utils.SimulationCfg(), "true", legacy=True)
     env, agent = load_policy(raw, run, args.run, args.checkpoint)
     dev = raw.device
     names = raw.robot.joint_names

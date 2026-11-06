@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from playground.common import load_policy, make_env, parse_overrides
+from playground.common import load_policy, make_env, parse_overrides, run_overrides
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
@@ -53,12 +53,12 @@ with launch_simulation(sim_cfg, args):
         if hasattr(viz, "window_width"):
             viz.window_width, viz.window_height = args.width, args.height
     steps = int(args.seconds / (1 / 30))
-    ov = dict(run["overrides"]) | {"edge_cmd_level_init": 1.0, "edge_cmd_level_fixed": True} | parse_overrides(args.set)
+    ov = run_overrides(run) | {"edge_cmd_level_init": 1.0, "edge_cmd_level_fixed": True} | parse_overrides(args.set)
     ov["viewer"] = ViewerCfg(origin_type="world")  # the default follows env 0's rider and would override the camera
-    cfg = SnowboardEnvCfg(task=run["task"])
+    cfg = SnowboardEnvCfg()
     cfg.video_recorders = [VideoRecorderCfg(source="visualizer:kit", output_dir=str(args.out), video_length=steps,
                                             output_filename_prefix="fleet")]
-    raw = make_env(SnowboardEnv, cfg, ov, args.num_envs, sim_cfg, "true")
+    raw = make_env(SnowboardEnv, cfg, ov, args.num_envs, sim_cfg, "true", legacy=True)
     env, agent = load_policy(raw, run, args.run, args.checkpoint)
     down = torch.tensor([1.0, 0.0, 0.0], device=raw.device)
     side = torch.tensor([0.0, 1.0, 0.0], device=raw.device)

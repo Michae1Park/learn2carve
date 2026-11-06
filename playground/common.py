@@ -18,7 +18,10 @@ def add_train_args(parser, default_timesteps: int | None = None):
     parser.add_argument("--num_envs", type=int, default=None, help="default: from <algo>.yaml")
     parser.add_argument("--timesteps", type=int, default=default_timesteps,
                         help="env steps per env; default: " + (str(default_timesteps) if default_timesteps else "from <algo>.yaml"))
-    parser.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE", help="env cfg overrides, see env.py")
+    parser.add_argument("--rewards", type=Path, default=None, metavar="YAML",
+                        help="reward weights, e.g. playground/snowboard/rewards/stage3.yaml; default: RewardsCfg")
+    parser.add_argument("--set", nargs="*", action="extend", default=[], metavar="KEY=VALUE",
+                        help="env cfg overrides, see env.py; rewards.<name>=... for a reward; may repeat")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--init_from", type=Path, default=None, metavar="RUN[/FILE]",
                         help="warm start: load policy, value and normalisers from a run's checkpoint "
@@ -62,6 +65,7 @@ def new_run(args, task: str, cfg_dir: Path = CFG_DIR, log_root: Path = LOG_ROOT,
         "task": task,
         "algo": args.algo,
         **extra,
+        "rewards": yaml.safe_load(args.rewards.read_text()) if args.rewards else {},
         "overrides": parse_overrides(args.set),
         "num_envs": args.num_envs or agent_cfg["num_envs"],
         "timesteps": args.timesteps or agent_cfg["timesteps"],
@@ -70,12 +74,33 @@ def new_run(args, task: str, cfg_dir: Path = CFG_DIR, log_root: Path = LOG_ROOT,
     return run_dir, run, agent_cfg
 
 
-def make_env(env_cls, cfg, overrides: dict, num_envs: int, launched_sim_cfg, suppress_warnings: str = "true"):
-    """Call inside ``launch_simulation(launched_sim_cfg, args)``, which fills in the device and visualizers."""
+def run_overrides(run: dict) -> dict:
+    """A run.yaml's rewards and overrides as one dict of cfg keys (rewards as rewards.<name>)."""
+    return {f"rewards.{k}": v for k, v in run.get("rewards", {}).items()} | run["overrides"]
+
+
+def set_field(cfg, key: str, value, legacy: bool = False):
+    """key: a field, or rewards.<field>. legacy: map an older run's rew_<term> and reward-shape keys into
+    cfg.rewards and skip fields since removed, instead of raising."""
+    *parents, name = key.split(".")
+    target = cfg
+    for part in parents:
+        target = getattr(target, part)
+    if hasattr(target, name):
+        setattr(target, name, value)
+    elif legacy and not parents and hasattr(cfg, "rewards") and hasattr(cfg.rewards, name.removeprefix("rew_")) \
+            and not isinstance(value, bool):  # the old on/off flag edge_cmd: true is not the edge_cmd weight
+        setattr(cfg.rewards, name.removeprefix("rew_"), value)
+    elif not legacy:
+        raise KeyError(f"{type(target).__name__} has no field {name!r}")
+
+
+def make_env(env_cls, cfg, overrides: dict, num_envs: int, launched_sim_cfg, suppress_warnings: str = "true",
+             legacy: bool = False):
+    """Call inside ``launch_simulation(launched_sim_cfg, args)``, which fills in the device and visualizers.
+    legacy: overrides come from a saved run.yaml, which may name fields since removed (see set_field)."""
     for key, value in overrides.items():
-        if not hasattr(cfg, key):
-            raise KeyError(f"{type(cfg).__name__} has no field {key!r}")
-        setattr(cfg, key, value)
+        set_field(cfg, key, value, legacy)
     cfg.scene.num_envs = num_envs
     cfg.sim.device = launched_sim_cfg.device
     cfg.sim.visualizer_cfgs = launched_sim_cfg.visualizer_cfgs

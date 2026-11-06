@@ -52,13 +52,13 @@ with launch_simulation(sim_utils.SimulationCfg(), args):
     from playground.snowboard.env import SnowboardEnv, SnowboardEnvCfg
 
     combos = list(itertools.product(AMPS, GAINS)) * args.reps
-    ov = {"stance_tag": "squat3", "binding_angles_deg": (54, 45), "pelvis_mass_frac": 0.2, "guide_steps": 0,
+    ov = {"stance_tag": "squat3", "binding_angles_deg": (54, 45), "pelvis_mass_frac": 0.2,
           "slope_deg": args.slope, "episode_length_s": args.seconds + 5, "start_heading_deg": 0.0}
     if args.scale:
         ov["action_scale"] = args.scale
     ov |= parse_overrides(args.set)
     LAT, TOE, HEEL = PATTERNS[args.pattern]
-    raw = make_env(SnowboardEnv, SnowboardEnvCfg(task="carve"), ov, len(combos), sim_utils.SimulationCfg(), "true")
+    raw = make_env(SnowboardEnv, SnowboardEnvCfg(), ov, len(combos), sim_utils.SimulationCfg(), "true")
     names = [raw.robot.joint_names[i] for i in raw.actuated.tolist()]
     idx = torch.tensor([names.index(n) for n in LAT], device=raw.device)
     toe, heel = (torch.tensor(v, dtype=torch.float, device=raw.device) for v in (TOE, HEEL))
