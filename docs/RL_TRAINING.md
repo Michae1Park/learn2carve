@@ -230,9 +230,24 @@ new edge already earns something.
 other. It applies only when $`\lvert\theta^\ast\rvert > 10°`$ and $`\lvert\theta\rvert > 3°`$, and is 0 otherwise. It makes starting a
 switch pay before the angle matches.
 
-**Pose reference.** From the pendulum model. $`\phi_{\mathrm{legs}}`$ and $`\phi_{\mathrm{CoM}}`$ are the lean of the pelvis and of
-the rider's center of mass from the board, in its roll plane; the legs should lean past the commanded edge and the center
-of mass less. It is 0 when $`\lvert\theta^\ast\rvert < 10°`$.
+**Pose reference.** From the pendulum model: the legs should lean past the commanded edge and the center of mass less.
+It is 0 when $`\lvert\theta^\ast\rvert < 10°`$.
+
+$`\phi_{\mathrm{legs}}`$ and $`\phi_{\mathrm{CoM}}`$ are **not observed**: the env computes them from the simulator state,
+for the reward only. Each is the angle, in the board's roll plane, of a point above the board away from the snow normal.
+With $`\mathbf{p}`$ the positions of the board, the pelvis and the rider's center of mass:
+
+```math
+\phi_{\mathrm{legs}} = \mathrm{atan2}\big(\mathbf{d}_{\mathrm{legs}}\cdot\hat{\mathbf{t}},\ \mathbf{d}_{\mathrm{legs}}\cdot\hat{\mathbf{n}}\big) \qquad \phi_{\mathrm{CoM}} = \mathrm{atan2}\big(\mathbf{d}_{\mathrm{CoM}}\cdot\hat{\mathbf{t}},\ \mathbf{d}_{\mathrm{CoM}}\cdot\hat{\mathbf{n}}\big)
+```
+
+```math
+\mathbf{d}_{\mathrm{legs}} = \mathbf{p}_{\mathrm{pelvis}} - \mathbf{p}_{\mathrm{board}} \qquad \mathbf{d}_{\mathrm{CoM}} = \mathbf{p}_{\mathrm{CoM}} - \mathbf{p}_{\mathrm{board}} \qquad \mathbf{p}_{\mathrm{CoM}} = \frac{\sum_i m_i\,\mathbf{p}_i}{\sum_i m_i}
+```
+
+- $`\hat{\mathbf{n}}`$ is the snow normal. $`\hat{\mathbf{t}}`$ lies in the snow plane, perpendicular to the board's long axis, and points toward the toe edge.
+- The center of mass is the mass-weighted mean of the rider's bodies, with the board left out.
+- $`\phi > 0`$ is a lean toward the toe edge, the same sign as $`\theta`$ and $`\theta^\ast`$. A point straight above the board along the snow normal has $`\phi = 0`$.
 
 ```math
 g_p = \exp\left(-\left(\frac{\phi_{\mathrm{legs}} - 1.15\,\theta^\ast}{15°}\right)^2\right) \exp\left(-\left(\frac{\phi_{\mathrm{CoM}} - 0.77 \cdot 1.15\,\theta^\ast}{15°}\right)^2\right)
