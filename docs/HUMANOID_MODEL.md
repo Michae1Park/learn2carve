@@ -102,8 +102,9 @@ Without synergy (baseline) the 28 joint actions move $\pm 50\%$ of the half-rang
 
 ## 6. Rider options (`CarveEnvCfg` flags, `--set`)
 
-The defaults are the baseline above. The demo run (`scripts/train_stage2_transition.sh`, `train_stage3_full_s.sh`) sets
-the **bold** rows; the rest are available but off.
+The `CarveEnvCfg` defaults are the baseline above. The snowboard env (`SnowboardEnvCfg` in
+`playground/snowboard/env.py`) turns on the **bold** rows by default, in every stage; the rest are available but off.
+Stance width and binding angles come from `config.yaml`.
 
 | Flag | Change |
 |---|---|
