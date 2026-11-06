@@ -79,7 +79,7 @@ $$R = \max\!\left(R_{sc}\cos\theta,\ \frac{v^2}{\mu(\theta)\,g}\right) \qquad v_
 | **Carve → skid transition** (10 m/s) | Follows $R_{sc}\cos\theta$ to ~25°, then flat at $v^2/\mu g$ |
 | **Terminal speed** | 18.2 / 18.2 m/s on 10°, 23.6 / 23.6 m/s on 15° |
 
-`tests/test_snow.py` pins the same behaviour, plus signs and edge cases (a flat board doesn't steer, an airborne board
+`tests/test_snow.py` pins the same behavior, plus signs and edge cases (a flat board doesn't steer, an airborne board
 has no grip).
 
 ## 5. In the trained carve

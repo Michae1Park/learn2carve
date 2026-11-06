@@ -58,7 +58,7 @@ Both feet are welded to the board: the front binding is a tree joint, the back o
 
 ## 4. Two-half board (opt-in, not used in the demo)
 
-`--set board_flex=true` splits the board into **two rigid halves** (nose, tail) joined at the centre by a spring joint
+`--set board_flex=true` splits the board into **two rigid halves** (nose, tail) joined at the center by a spring joint
 the policy can't drive. The demo rides the rigid board of §1; this extension is validated against the snow model but
 never trained on.
 
@@ -73,7 +73,7 @@ on top of the rigid-board sidecut:
 | Effect | Formula | Result |
 |---|---|---|
 | **Camber** | $c = 1 + q_{\text{bend}}/\varphi_0$, $\varphi_0 = 4h/L$ | No sidecut until the load presses the board flat |
-| **Progressive sidecut** | $R(s) = R_{sc} + (R_{\text{tip}} - R_{sc})\,s^2$ | 7.6 m centred, 10.7 m at a tip ($s$ = nose share − tail share) |
+| **Progressive sidecut** | $R(s) = R_{sc} + (R_{\text{tip}} - R_{sc})\,s^2$ | 7.6 m centered, 10.7 m at a tip ($s$ = nose share − tail share) |
 | **Torsion** | $\bar\theta = \sum_i w_i\theta_i$, $w_i = N_i/N$ | The arc follows the load-weighted edge angle |
 | **Flex** | $(N - N_c)_+\,\frac{L}{6\,EI}\sin\lvert\bar\theta\rvert$, $EI = 1500$ N·m² | Load beyond $N_c$ tightens the arc |
 
@@ -86,7 +86,7 @@ $$\kappa = \frac{c}{R(s)\cos\bar\theta} + (N - N_c)_+\,\frac{L}{6\,EI}\,\sin\lve
 | Check | Sim / formula |
 |---|---|
 | **Flex**: radius vs load (θ = 40°) | 5.85 / 5.82 m at 0.4 mg, 3.99 / 3.95 m at 2 mg |
-| **Progressive sidecut**: radius vs centre of pressure (θ = 20°) | 7.15 / 7.14 m centred, 10.06 / 10.05 m all on one half |
+| **Progressive sidecut**: radius vs center of pressure (θ = 20°) | 7.15 / 7.14 m centered, 10.06 / 10.05 m all on one half |
 | **Torsion**: radius vs tail edge (nose 35°) | 6.24 / 6.23 m untwisted, 7.03 / 7.02 m with the tail at 10° |
 
 ## Not modelled (two-half board)

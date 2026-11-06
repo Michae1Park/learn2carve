@@ -132,7 +132,7 @@ Measured on the earlier rider (baseline stance, before the rebuild); not re-run 
 
 - **Velocity iterations don't help** (12 / 4 and 12 / 6 are identical).
 - **The split torso first sagged 0.15 rad and fell.** The chest sphere overlaps the pelvis's upper-waist sphere by
-  ~3 cm; once the lumbar segment sat between them they were no longer neighbours, so PhysX pushed them apart every
+  ~3 cm; once the lumbar segment sat between them they were no longer neighbors, so PhysX pushed them apart every
   step. The pair is now filtered.
 
 ## Known gaps

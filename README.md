@@ -39,7 +39,7 @@ modified for snowboarding, and is trained with PPO in stages.
 
 - **Models** the snow, the board and their interaction (glide, sidecut steering, edge grip).
 - **Rider:** a modified AMP humanoid, strapped to the board through bindings.
-- **Reward:** designed to favour a high edge angle, a thin track and turns that finish across the hill.
+- **Reward:** designed to favor a high edge angle, a thin track and turns that finish across the hill.
 - **Training:** PPO in stages in Isaac Sim, up to full S turns at 30–50° edge angles.
 
 ## Models

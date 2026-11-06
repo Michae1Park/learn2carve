@@ -1,23 +1,63 @@
 # RL training
 
-One env (`playground/snowboard/env.py`) and plain **PPO** (`skrl`). The rider learns linked carved turns by
-**tracking a commanded edge angle**: the command plays the part of the turn planner, and the policy learns to put the
-board on that edge and stay up. Training runs in **stages**, each warm-started from the last. No demonstration, no
-motion data. SI units; angles in ° unless marked rad.
+A simulated rider learns to **carve**: link clean, high-edge-angle turns into an S down a fenced trail. One env
+(`playground/snowboard/env.py`) and plain **PPO** (`skrl`), no demonstration and no motion data. SI units; angles in °
+unless marked rad.
+
+## Overview
+
+### What the rider learns, in stages
+
+Carving is too much to learn at once, so training is split into stages, each warm-started from the last. The order
+follows what failed when it was tried all at once.
+
+| Stage | The rider learns to | Why this order |
+|---|---|---|
+| 1. Hold a carve | Balance on one edge | Dropped: the policy that held an edge never learned to leave it |
+| **2. Change edges** | Flip from the toe edge to the heel edge and back, again and again, without falling | The hard move, and the one every later stage reuses |
+| **3. Full S** | Link the flips into an S, with the edge change triggered by the turn itself, and stay between the fences | A timer ignores where the board is and drifts into a fence |
+| **4. Tighter turns** | End each turn sooner, without the overshoot | Stage 3's turns swing past their target |
+
+Details and results per stage: [§2](#2-stages).
+
+### What a good carve looks like
+
+A carve is the board following the arc of its own sidecut, with no sideways skid. Its signature is a **high edge angle**
+(the board rolled well over onto its edge) with almost no **slip**, which draws a thin line in the snow.
+
+| | Skidded turn | Carved turn | Trained rider |
+|---|---|---|---|
+| Edge angle | low | 40°+ | toe 42° / heel 38° mean, up to 52° |
+| Slip | large | ~0 | 2.5–3° |
+| Track | smeared | thin line | thin S, 4–5 turns per 100 m |
+
+A high edge angle needs speed (a 40°+ edge only balances above ~7 m/s, [§1](#1-the-edge-command-a-target-the-rider-tracks)),
+which is why the slope steepens and the target angles rise together as the stages go on.
+
+### Three ideas that make it work
+
+| Idea | In short |
+|---|---|
+| **Track a command, don't reward turning** | The env gives the rider a target edge angle each step. Rewards for turning, speed and carving all ended with one deep edge held into the fence; a target that alternates heel ↔ toe draws the S directly ([§1](#1-the-edge-command-a-target-the-rider-tracks)) |
+| **Start from a good pose** | The rider's neutral pose is a snowboarder's base position: a squat, knees bent, over the board. Every action is a small change around it, so before it can carve it has to hold that position. Starts in stage 2 are already on an edge, so the policy spends its time on the switch and not on getting up ([humanoid model](HUMANOID_MODEL.md#4-stance-scriptsmake_stancepy)) |
+| **Add a hint for balance** | A reward for reaching the inside hand toward the board edge (counter-angulation), which is what human riders learn for balance at high edge angles ([§4](#4-reward)) |
+
+### One training step
 
 ![Training loop: policy at 30 Hz, PD joints, snow model and PhysX at 120 Hz, rewards, PPO update every 48 steps](rider/training_loop.svg)
 
-**One training step.** The env gives the rider a target edge angle $\theta^\ast$ (the *edge command*). The policy sees
-the body state and $\theta^\ast$, and outputs joint targets. The body tips the board, the [snow model](SNOW_MODEL.md)
-turns that edge into a turn, and the reward measures how close the edge came to $\theta^\ast$. PPO improves the policy
-from 2048 riders in parallel. The policy never steers or plans a path: the command is the planner, the body is the skill.
+The env gives the rider a target edge angle $\theta^\ast$ (the *edge command*). The policy sees the body state and
+$\theta^\ast$, and outputs joint targets. The body tips the board, the [snow model](SNOW_MODEL.md) turns that edge into a
+turn, and the reward measures how close the edge came to $\theta^\ast$. PPO improves the policy from 2048 riders in
+parallel. The policy does not plan a path: that lives in the command generator ([§1](#1-the-edge-command-a-target-the-rider-tracks)).
+The policy learns the body.
 
-## 1. The task: follow the edge command
+## 1. The edge command: a target the rider tracks
 
 **No line is laid on the snow.** Each step the env commands a signed edge angle $\theta^\ast$ (heel $< 0$, toe $> 0$).
 The board's sidecut turns whatever edge the rider holds ([snow model §2](SNOW_MODEL.md#2-sidecut-steering)), so a
 command that alternates heel ↔ toe draws an S. The policy only has to learn the body: get the board onto that edge,
-hold it, and change it without falling.
+hold it, and change it without falling, in a posture it can switch from (the pose, rise and grab terms of §4).
 
 | Quantity | Definition |
 |---|---|
@@ -44,7 +84,11 @@ a fall penalty is learnable: it linked an edge change every 2 s at ±45–50°, 
 |---|---|---|
 | **Timed** | Stage 2 | A trapezoid heel → flat → toe, period $T$ |
 | **Heading** | Stages 3–4 | Hold one edge at $\pm A$ until the turn has come round ($\psi$ past the switch heading), then ramp through flat to the other edge over 0.6 s. Never sooner than 1 s, never later than 4 s on one edge |
-| **Centring** | Stages 3–4 | The switch heading moves 2° per metre off the piste centre (capped): the turn back toward the centre runs longer, the one away from it ends sooner, so the S stays between the fences |
+| **Centering** | Stages 3–4 | The switch heading moves 2° per meter off the trail center (capped): the turn back toward the center runs longer, the one away from it ends sooner, so the S stays between the fences |
+
+In stages 3–4 the command is **closed-loop**: it reads the travel heading $\psi$ and the position across the trail, so
+the turn planner is hand-built into the env, and the policy sees $\psi$, its position and the command 0.3 s and 0.6 s
+ahead (§3).
 
 The timed command, with amplitude $A$ and random phase $\varphi$:
 
@@ -61,9 +105,9 @@ must first learn to *switch* edges, then to ride a course on switching, then to 
 
 | | **Stage 1: hold a carve** | **Stage 2: change edges** | **Stage 3: full S** | **Stage 4: tighter turns** |
 |---|---|---|---|---|
-| Learns | Balance on one edge | Get from one edge to the other without falling | Link turns into an S that stays on the piste | End each turn sooner, without the overshoot |
+| Learns | Balance on one edge | Get from one edge to the other without falling | Link turns into an S that stays on the trail | End each turn sooner, without the overshoot |
 | Start | In a carve | In a carve (80% toe), 4–5.5 m/s; 50% from recorded toe-carve states | Riding flat, ±20° of the fall line, 4–5.5 m/s; 30% from recorded states | As stage 3 |
-| Edge command | One fixed side, at the balanced edge | **Timed**: heel ↔ toe, period $T$ 6 → 4 s | **Heading**: switch at 50° across the hill, centring up to 25° | Switch at **40°**, centring up to 10° |
+| Edge command | One fixed side, at the balanced edge | **Timed**: heel ↔ toe, period $T$ 6 → 4 s | **Heading**: switch at 50° across the hill, centering up to 25° | Switch at **40°**, centering up to 10° |
 | Edge angle | Balanced edge | ±15 → 30° | ±25 → 45° | As stage 3 |
 | Slope, episode | | 7°, 10 s | 9°, 20 s | As stage 3 |
 | Reward | | Hand grab weight 5, Gaussian | Hand grab weight 10, linear (§4) | As stage 3 |
@@ -130,7 +174,7 @@ to be allowed to accelerate (eval mean 7.9 m/s). Speed is never rewarded; the st
 | Version | Command | Result |
 |---|---|---|
 | Heading | Switch at 50° across the hill, or after 3 s | Turns rarely reached 50° in time, so edges changed on the 3 s backstop. Training: 2% falls, 9% fence. Eval: 3 falls and 7 fence exits in 11 runs |
-| **Centred** | The switch heading moves 2° per metre off the piste centre (capped at 25°), 4 s backstop. The turn back toward the centre runs longer, the one away from it ends sooner | Training: 0% falls, 2% fence, edge error 5° at ±45°. Eval: 5 of 5 runs finish the 100 m course |
+| **Centered** | The switch heading moves 2° per meter off the trail center (capped at 25°), 4 s backstop. The turn back toward the center runs longer, the one away from it ends sooner | Training: 0% falls, 2% fence, edge error 5° at ±45°. Eval: 5 of 5 runs finish the 100 m course |
 
 **Reward change.** The inside-hand grab went from a Gaussian at weight 5 to a linear fall-off at weight 10. With the
 Gaussian, the toe-turn hand sat 0.9 m from its target and felt no pull; after the change the hands came to 0.45 m
@@ -145,7 +189,7 @@ when the switch happens.
 The command flips only *after* $\psi$ passes the switch heading, and the board keeps swinging while the command ramps
 through flat for 0.6 s.
 
-**Change.** Two numbers, no new reward and no new start: switch at **40°** instead of 50°, and cap the centring shift at
+**Change.** Two numbers, no new reward and no new start: switch at **40°** instead of 50°, and cap the centering shift at
 10° (a 25° shift would move the switch heading far from 40°). Warm-started from stage 3.
 
 **Result.** Mean heading 35–39° (stage 3: 38–42°, with switches overshooting to 91°), 4–5 turns per 100 m (stage 3: 3–4),
@@ -185,22 +229,22 @@ Weights $w_i$ are those of stage 3.
 |---|---|---|
 | **Edge command** | $e^{-(e/\sigma)^2}$, $\sigma$ = 30°, × 0 while the board is flat (edge < 10°, full from 20°): a flat board never pays | 30 |
 | **Edge side** | +1 on the commanded side, −1 on the other (command > 10°, edge > 3°): starting the switch pays before the angle matches | 20 |
-| **Pose reference** | Legs lean past the edge, centre of mass lean less (angulation), from the pendulum model (formula below); 0 near flat | 10 |
+| **Pose reference** | Legs lean past the edge, center of mass lean less (angulation), from the pendulum model (formula below); 0 near flat | 10 |
 | **Rise** | While the command is within 8° of flat: clip((pelvis height − 0.35 m) / 0.2 m), i.e. come up through the edge change | 30 |
 | **Tilt** | clip((torso tilt − 50°) / 20°): a bow past ~65° can't get back to the heel | −10 |
 | **Hand grab** | clip(1 − $d$ / 1.2 m), $d$ the inside hand to its grab point (below). Counter-angulation for higher edges | 10 |
 | **Fall** | Once, a fall or a fence | −50 |
 
 **Pose reference.** With $\phi_{\mathrm{legs}}$ and $\phi_{\mathrm{CoM}}$ the lean of the pelvis and of the rider's
-centre of mass from the board, in its roll plane:
+center of mass from the board, in its roll plane:
 
 $$r_{\mathrm{pose}} = \exp\left(-\left(\frac{\phi_{\mathrm{legs}} - 1.15\,\theta^\ast}{15°}\right)^2\right) \exp\left(-\left(\frac{\phi_{\mathrm{CoM}} - 0.77 \cdot 1.15\,\theta^\ast}{15°}\right)^2\right)$$
 
 **Hand grab.** Heel turn: right hand → toe edge at the front foot. Toe turn: left hand → heel edge at the back foot
 (front and back foot as in the [bindings](BOARD_MODEL.md#3-bindings)). Stage 2 used a Gaussian,
-$e^{-(d/0.6)^2}$ ($d$ in metres), at weight 5.
+$e^{-(d/0.6)^2}$ ($d$ in meters), at weight 5.
 
-Nothing rewards speed, staying alive, posture or style: survival pays only through the edge terms it allows.
+Nothing rewards speed or staying alive: survival pays only through the terms above that it allows. Edge tracking is half of the positive weight; rise, pose reference and hand grab shape the posture that makes a switch possible.
 
 **Lessons (each cost at least one run):**
 
@@ -216,11 +260,13 @@ Nothing rewards speed, staying alive, posture or style: survival pays only throu
 | Toe → heel never learned | The board could not leave a low toe carve under any forced action: the torso twist sat at its limit | Rider rebuild ([humanoid model §6](HUMANOID_MODEL.md#6-rider-options-carveenvcfg-flags---set)) |
 | Boots added | Edge and lean actions flipped every step, the rider shook | Action smoothing |
 | Grab as a Gaussian, $\sigma$ = 0.25 / 0.6 m | The toe-turn hand sat 0.9 m away with no pull | Linear in distance to 1.2 m |
-| Edge change on a timer | Turns stopped short of 50° or drifted toward a fence | Heading switch with centring |
+| Edge change on a timer | Turns stopped short of 50° or drifted toward a fence | Heading switch with centering |
 
 ## 5. PPO
 
-PPO maximises the discounted sum of the reward of §4, $J(\pi) = \mathbb{E}\left[\sum_t \gamma^t r_t\right]$. With the
+### Objective
+
+PPO maximizes the discounted sum of the reward of §4, $J(\pi) = \mathbb{E}\left[\sum_t \gamma^t r_t\right]$. With the
 weights of stage 3 and $e = \theta - \theta^\ast$, each step pays
 
 $$r_t = \Delta t\Big[\,30\,g_e + 20\,g_s + 10\,g_p + 30\,g_r - 10\,g_t + 10\,g_h\Big] - 50\ \mathbb{1}[\text{fall or fence}]$$
@@ -234,7 +280,9 @@ $$r_t = \Delta t\Big[\,30\,g_e + 20\,g_s + 10\,g_p + 30\,g_r - 10\,g_t + 10\,g_h
 | $g_t$ | Tilt | $\mathrm{clip}\big((\text{torso tilt} - 50°)/20°,\,0,\,1\big)$ |
 | $g_h$ | Hand grab | $\mathrm{clip}(1 - d/1.2\ \mathrm{m},\,0,\,1)$ while on a heel or toe turn, else 0 |
 
-**Sampling.** PhysX does not sample anything; it is the simulator that turns each action into the next state. The
+### Sampling
+
+PhysX does not sample anything; it is the simulator that turns each action into the next state. The
 randomness in the data comes from two places:
 
 | Source | What is drawn |
@@ -258,13 +306,17 @@ at every point of an episode (a fresh start next to a rider mid-switch) and the 
 steps. A time-out is not a failure: the value is bootstrapped through it. A fall ends the return, which is what the
 −50 prices. At evaluation the noise is switched off and the rider takes the mean action $\mu_\theta(s_t)$.
 
-**Advantage (GAE).** Over each 48-step rollout, with the critic $V$, $\gamma = 0.995$ and $\lambda = 0.98$:
+### Advantage (GAE)
+
+Over each 48-step rollout, with the critic $V$, $\gamma = 0.995$ and $\lambda = 0.98$:
 
 $$\delta_t = r_t + \gamma\,(1 - d_t)\,V(s_{t+1}) - V(s_t) \qquad \hat A_t = \sum_{l \ge 0} (\gamma\lambda)^l\,\delta_{t+l} \qquad \hat R_t = \hat A_t + V(s_t)$$
 
-$d_t$ marks the end of an episode (a fall, a fence or a time-out); advantages are normalised over the batch.
+$d_t$ marks the end of an episode (a fall, a fence or a time-out); advantages are normalized over the batch.
 
-**Loss.** With the probability ratio $\rho_t = \pi_\theta(a_t \mid s_t)\,/\,\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t)$:
+### Loss
+
+With the probability ratio $\rho_t = \pi_\theta(a_t \mid s_t)\,/\,\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t)$:
 
 $$\mathcal{L}_{\mathrm{clip}} = \mathbb{E}\Big[\min\big(\rho_t \hat A_t,\ \mathrm{clip}(\rho_t,\,1-\epsilon,\,1+\epsilon)\,\hat A_t\big)\Big] \qquad \epsilon = 0.2$$
 
@@ -276,10 +328,14 @@ The policy is a diagonal Gaussian over the 30 actions, $a \sim \mathcal{N}\big(\
 learned $\log\sigma$ per action. Observations and value targets pass through a running mean and standard deviation. The
 gradient norm is clipped at 1.0.
 
-**One update.** 48 steps × 2048 envs = 98k samples, split into 8 mini-batches of ~12k and swept 5 times: 40 gradient
+### One update
+
+48 steps × 2048 envs = 98k samples, split into 8 mini-batches of ~12k and swept 5 times: 40 gradient
 steps on each batch, then the batch is thrown away (on-policy). After each epoch the mean KL between old and new
 policy sets Adam's learning rate: it is divided by 1.5 when the KL goes above twice the 0.01 target and multiplied by
 1.5 when it falls below half.
+
+### Settings
 
 | Setting | Value |
 |---|---|
@@ -297,7 +353,7 @@ policy sets Adam's learning rate: it is divided by 1.5 when the KL goes above tw
 
 ## 6. Evaluation (`playground/snowboard/play.py`)
 
-A deterministic policy (mean action) rides fixed runs: piste centre, straight down, 100 m long, no recorded-state
+A deterministic policy (mean action) rides fixed runs: trail center, straight down, 100 m long, no recorded-state
 starts, and the edge command held at the level training ended on (`edge_cmd_level_init=1`, `edge_cmd_level_fixed`).
 Each run prints one line of stats; the longest is saved as `trail.png` + `ride.csv` (edge, command, slip, torso tilt,
 pelvis height per step). 
@@ -322,9 +378,9 @@ pelvis height per step).
 | Edge (toe / heel) | | mean 42° / 38°, max 52° / 48° |
 | Slip | | 2.5°: a clean carve, a thin line |
 | Turns | 1.7 per 10 s | 3–4 per run, an edge change every ~3.8 s |
-| Track | | −13 to +8 m from the centre (fences at ±20 m) |
+| Track | | −13 to +8 m from the center (fences at ±20 m) |
 
-![Track of the longest eval run: a thin centred S down 100 m](../saved/03_stage3_centred/trail.png)
+![Track of the longest eval run: a thin centered S down 100 m](../saved/03_stage3_centred/trail.png)
 
 The turns overshoot: the heading reaches 56–91° across the hill at the switch, aimed at 50–60°. The board also skids
 briefly through each edge change.
@@ -338,7 +394,7 @@ Stage 4 does this, warm-started from stage 3:
 | Setting | Stage 3 | Stage 4 | Effect |
 |---|---|---|---|
 | `edge_cmd_heading_deg` | 50 | 40 | Switch the edge at 40° across the hill: no overshoot, no flat cross-hill segment |
-| `edge_cmd_center_max_deg` | 25 | 10 | Smaller centring shift, so the switch heading stays near 40° |
+| `edge_cmd_center_max_deg` | 25 | 10 | Smaller centering shift, so the switch heading stays near 40° |
 
 | | Stage 3 | Stage 4 |
 |---|---|---|
