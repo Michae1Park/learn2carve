@@ -347,7 +347,7 @@ class SnowboardEnv(CarveEnv):
         return reward
 
     def _reward_terms(self) -> dict[str, torch.Tensor]:
-        """Per-second terms, each in [-1, 1]; docs/RL_TRAINING.md §4."""
+        """Per-second terms, each in [-1, 1]; docs/RL_TRAINING.md §3."""
         w = self.cfg.rewards
         edge, command = self.edge_angle(), self.edge_command()
         error = edge - command
