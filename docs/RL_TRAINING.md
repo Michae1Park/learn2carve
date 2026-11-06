@@ -204,43 +204,57 @@ toe peak. Without them every episode started tall, the only pose the policy had 
 
 ## 3. MDP
 
-| | |
-|---|---|
-| **Observation** (140) | Humanoid: joint positions and velocities, torso height, orientation, velocities, hands and feet relative to the root (AMP layout) |
-| | Board: $\theta$, $v_\parallel$, $v_\perp$, yaw rate, $N/mg$, grip usage ([snow model inputs](SNOW_MODEL.md#inputs)) |
-| | Last action, and the two synergy actions |
-| | Task (19): speed, $\psi$, $\beta$, board yaw, position between the fences, turn state, the edge command now / +0.3 s / +0.6 s (4 slots are unused, kept so saved policies load) |
-| **Action** (30) | 2 synergy actions (edge, lean) + 28 joint residuals, 30 Hz, smoothed: see [humanoid model §5](HUMANOID_MODEL.md#5-actions--joint-targets) |
-| **Fall** | Torso tilted > 95° (`lying_deg`; a toe carve bows the torso 55–70°), pelvis < 0.12 m above the board, pelvis < 0.15 m above the snow, board past 85° of edge, or riding tail first (slip > 100° above 2 m/s) |
-| **Fence** | Board past ±20 m across the slope; ends the episode like a fall |
-| **Time-out** | End of the episode (stage length above) |
+![One policy step: observation, MLP, Gaussian sample, clip and smooth, joint targets, PD drives](rider/policy_path.svg)
+
+| | Group | Part | Size | Notation | Content |
+|---|---|---|---|---|---|
+| **Observation** (140) | Humanoid | Joint positions | 30 | $q \in \mathbb{R}^{30}$ | All joints (28 driven + 2 passive) |
+|  |  | Joint velocities | 30 | $\dot q \in \mathbb{R}^{30}$ | Same joints |
+|  |  | Torso height | 1 | $h$ | Root height above the snow |
+|  |  | Torso orientation | 6 | $(\mathbf{t},\ \mathbf{n})$ | Root frame as tangent and normal vectors, 3 + 3 |
+|  |  | Torso velocity | 3 + 3 | $\mathbf{v},\ \boldsymbol{\omega}$ | Linear and angular velocity |
+|  |  | Hands and feet | 12 | $\mathbf{p}_k - \mathbf{p}_{\mathrm{root}}$ | 4 key bodies relative to the root, x, y, z each |
+|  | Board | Edge angle | 1 | $\theta$ | Roll relative to the snow |
+|  |  | Velocity | 2 | $v_\parallel,\ v_\perp$ | Along and across the board |
+|  |  | Yaw rate | 1 | $\dot\psi_b$ | Board rotation about the snow normal |
+|  |  | Load | 1 | $N/mg$ | Normal force over body weight |
+|  |  | Grip usage | 1 | $u$ | Edge grip used / available (capped at 5) |
+|  | Previous action | Joint actions | 28 | $a^{j}_{t-1}$ | Last step's joint residuals |
+|  |  | Synergy actions | 2 | $s_{0,t-1},\ s_{1,t-1}$ | Last step's edge and lean synergies |
+|  | Task | Speed | 1 + 1 | $v,\ v_{\mathrm{cmd}}$ | Board speed and the episode's sampled speed command |
+|  |  | Path heading | 2 | $\sin\psi,\ \cos\psi$ | Travel direction, 0 = fall line |
+|  |  | Slip | 2 | $\sin\beta,\ \cos\beta$ | Board axis vs. travel |
+|  |  | Board yaw | 2 | $\sin\gamma,\ \cos\gamma$ | Board heading |
+|  |  | Position | 1 | $y / W$ | Across the trail, in half-widths of the fence |
+|  |  | Turn state | 3 | side, swing, $t_{\mathrm{turn}}$ | Current turn side, its largest $\lvert\psi\rvert$ so far, time since the last turn (clipped at 10 s, ÷ 5) |
+|  |  | Edge command | 3 | $\theta^\ast(t),\ \theta^\ast(t{+}0.3),\ \theta^\ast(t{+}0.6)$ | Now and 0.3 s, 0.6 s ahead |
+|  |  | Unused | 4 | 0 | Kept so saved policies load |
+| **Action** (30) | Synergy | Edge | 1 | $s_0$ | Ankles and knees together, +1 toward the toe edge, −1 toward the heel |
+|  |  | Lean | 1 | $s_1$ | Abdomen side-bend (counter-angulation) |
+|  | Joint residuals (28) | Abdomen | 3 | $a^{\mathrm{abd}}$ | Spine twist, side-bend, bow; ±15% of the half-range |
+|  |  | Neck | 3 | $a^{\mathrm{neck}}$ | ±15% |
+|  |  | Hips | 6 | $a^{\mathrm{hip}}$ | 3 per leg; ±15% |
+|  |  | Knees | 2 | $a^{\mathrm{knee}}$ | Flexion only (the twist is passive); ±15% |
+|  |  | Ankles | 6 | $a^{\mathrm{ankle}}$ | 3 per foot; ±15%, clipped to the boots' range |
+|  |  | Shoulders | 6 | $a^{\mathrm{sh}}$ | 3 per arm; **±50%** (the arms reach for the hand grab) |
+|  |  | Elbows | 2 | $a^{\mathrm{elb}}$ | **±50%** |
+|  | Processing | Sample | 30 | $a \sim \mathcal{N}(\mu, \sigma^2)$ | Raw Gaussian sample, 30 Hz; clipped to $[-1, 1]$ |
+|  |  | Smoothing | 30 | $\tilde a_t = 0.65\,\tilde a_{t-1} + 0.35\,a_t$ | EMA, ~0.1 s, stops chatter |
+|  |  | Joint target | 28 | $q^\ast$ | Stance + scaled residual + synergy terms, clipped to the joint limits; held by the PD drives ([humanoid model §5](HUMANOID_MODEL.md#5-actions--joint-targets)) |
+| **Fall** |  | Torso tilt |  | $\phi_{\mathrm{torso}} > 95^\circ$ | `lying_deg`; a toe carve bows the torso 55–70° |
+|  |  | Pelvis above the board |  | $h_{\mathrm{pelvis,board}} < 0.12$ m | Sitting on the board |
+|  |  | Pelvis above the snow |  | $h_{\mathrm{pelvis,snow}} < 0.15$ m | Down on the snow |
+|  |  | Edge angle |  | $\lvert\theta\rvert > 85^\circ$ | Board on its side |
+|  |  | Tail first |  | $\lvert\beta\rvert > 100^\circ$ and $v > 2$ m/s | Riding backwards |
+| **Fence** |  | Position |  | $\lvert y\rvert > W = 20$ m | Board past the fence across the slope; ends the episode like a fall |
+| **Time-out** |  | Episode length |  | $t > T_{\mathrm{ep}}$ | 10 s (stage 2), 20 s (stages 3–4); the value is bootstrapped through it |
 
 ### From observation to joint targets
 
-One policy step, end to end:
-
-![One policy step: observation, MLP, Gaussian sample, clip and smooth, joint targets, PD drives](rider/policy_path.svg)
-
-**Observation (140 numbers, all normalized by a running mean/std):**
-
-| Block | Size | Content |
-|---|---|---|
-| Joint positions, velocities | 30 + 30 | All 30 joints (28 driven + 2 passive) |
-| Torso | 1 + 6 + 3 + 3 | Height; orientation as tangent + normal vectors; linear and angular velocity |
-| Key bodies | 12 | Hands and feet relative to the root (x, y, z each) |
-| Board | 6 | $\theta$, $v_\parallel$, $v_\perp$, yaw rate, $N/mg$, grip usage |
-| Last action | 28 | The previous joint actions |
-| Task | 19 | Speed, $\psi$, $\beta$, board yaw (each as sin/cos where an angle), position between the fences, turn state, the edge command now / +0.3 s / +0.6 s, 4 unused slots |
-| Synergy state | 2 | The previous edge and lean synergy actions |
+**Observation:** 140 numbers, all normalized by a running mean/std (table above).
 
 **Policy output (30 numbers):** the network emits 30 means $\mu$. The standard deviations are not an output: they are
 30 learned $\log\sigma$ parameters shared by all states. Each step $a \sim \mathcal{N}(\mu, \sigma^2)$.
-
-| Action | Count | Meaning |
-|---|---|---|
-| Edge synergy $s_0$ | 1 | Ankles and knees together, +1 toward the toe edge, −1 toward the heel |
-| Lean synergy $s_1$ | 1 | Abdomen side-bend (counter-angulation) |
-| Joint residuals $a_j$ | 28 | A small offset on each driven joint (arms larger) |
 
 **To joint targets:** the sample is clipped to $[-1, 1]$ and smoothed (EMA, 0.35 on the new value). Each joint target
 is the squat stance plus its scaled residual plus the synergy contributions, clipped to the joint limits (formula and
