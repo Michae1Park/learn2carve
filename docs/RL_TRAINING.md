@@ -47,10 +47,23 @@ running edge error is below 12° and falls above 24°. The policy sees the comma
 
 ## 2. Stages
 
-| Stage | Script | Start | Episode | Slope | Command | Speed |
-|---|---|---|---|---|---|---|
-| **2. Change edges** | `train_stage2_transition.sh` | Balanced on an edge (80% toe), 50% from recorded toe-carve states | 10 s | 7° | Timed, ±15 → 30°, $T$ 6 → 4 s | 4–5.5 m/s |
-| **3. Full S** | `train_stage3_full_s.sh` | Flat, heading within ±20° of the fall line, 4–5.5 m/s; 30% recorded states | 20 s | 9° | Heading + centring, ±25 → 45° | free (eval mean 7.9 m/s) |
+Each stage learns a different thing, but the difference lies in the **task setup** (start, edge command, slope), not
+the reward: both track the edge command with the same terms. Stage 2 learns the switch move, stage 3 uses it to ride
+the course.
+
+| | **Stage 2: change edges** | **Stage 3: full S** |
+|---|---|---|
+| Script | `train_stage2_transition.sh` (from scratch) | `train_stage3_full_s.sh` (warm-started from stage 2) |
+| Learns | Get from one edge to the other without falling | Link turns into an S that stays on the piste |
+| Start | Already in a carve, balanced on an edge (80% toe), 4–5.5 m/s; 50% from recorded toe-carve states | Riding flat, heading within ±20° of the fall line, 4–5.5 m/s; 30% from recorded states |
+| Edge command | On a **timer**: heel ↔ toe, period $T$ 6 → 4 s | On **heading**: switch once the turn comes round to 50°, steered toward the centre |
+| Edge angle | ±15 → 30° | ±25 → 45° |
+| Slope, episode | 7°, 10 s | 9°, 20 s |
+| Speed | Starts 4–5.5 m/s | Free (eval mean 7.9 m/s): the steeper slope reaches the speed a 40°+ edge needs |
+| Reward | `rewards/stage2.yaml` | `rewards/stage3.yaml`: the same, except the hand grab (weight 10 instead of 5, linear instead of Gaussian) |
+
+**Tuning within a stage** changes the edge command, not the reward: `saved/04_stage3_tighter` is stage 3 with an
+earlier switch heading (40° instead of 50°), not a stage of its own (§7).
 
 **No hold-only stage.** An earlier stage 1 trained only to hold a carve; stage 2 warm-started from it never learned
 to change edges (it kept holding the edge stage 1 taught). Stage 2 from scratch learns the hold anyway, because its
