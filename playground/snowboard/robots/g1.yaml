@@ -18,6 +18,8 @@ env:
   synergy_edge_rad: {left_knee_joint: 0.5, right_knee_joint: 0.5, left_ankle_pitch_joint: -0.3, right_ankle_pitch_joint: -0.3}
   synergy_lean_rad: {waist_roll_joint: 0.4}
   synergy_toe_rad: {}
+  arm_action_scale: 0.25        # shoulder half-range ~165°: 0.5 swung the arms ±1.4 rad per unit action
+  free_action_scale: {waist_roll: 1.0, waist_pitch: 1.0}   # full ±30° each: at kp 40 the policy holds the torso up with offset targets, as on the robot
 
   # --- cues scaled to the robot: lengths × 0.8 (1.32 / 1.65 m). Speeds stay: the board and its sidecut are the adult ones
   fall_height: 0.12             # m, pelvis above the snow (0.15)

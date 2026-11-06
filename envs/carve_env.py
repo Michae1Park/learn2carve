@@ -126,6 +126,7 @@ class CarveEnvCfg(DirectRLEnvCfg):
     arm_action_scale: float | None = None  # not reduced by synergy_residual
     arm_stiffness_scale: float = 1.0
     leg_action_scale: float | None = None
+    free_action_scale: dict = {}  # {joint-name substring: scale}, like arm_action_scale: not reduced by synergy_residual
     knee_rotation: bool = False
     passive_joints: tuple[str, ...] = ()  # PASSIVE_GROUPS left to their drives at the stance target
 
@@ -301,6 +302,11 @@ class CarveEnv(DirectRLEnv):
         self.arm_joint = torch.tensor(["shoulder" in j or "elbow" in j for j in joints], device=self.device)
         if self.cfg.arm_action_scale is not None:
             scale[self.arm_joint] = self.cfg.arm_action_scale
+        self.free_joint = self.arm_joint & (self.cfg.arm_action_scale is not None)
+        for part, value in self.cfg.free_action_scale.items():
+            mask = torch.tensor([part in j for j in joints], device=self.device)
+            scale[mask] = value
+            self.free_joint |= mask
         self.action_scale = (scale * 0.5 * (self.joint_upper - self.joint_lower))[self.actuated]
         self.actions = torch.zeros(self.num_envs, num_dof(self.cfg), device=self.device)
         self.synergy = torch.zeros(self.num_envs, SYNERGIES, device=self.device)
@@ -388,10 +394,7 @@ class CarveEnv(DirectRLEnv):
     def _apply_action(self):
         target = self.stance_pos.clone()
         if self.cfg.synergy:
-            if self.cfg.arm_action_scale is not None:
-                residual = torch.where(self.arm_joint[self.actuated], 1.0, self.cfg.synergy_residual)
-            else:
-                residual = self.cfg.synergy_residual
+            residual = torch.where(self.free_joint[self.actuated], 1.0, self.cfg.synergy_residual)
             target[:, self.actuated] += residual * self.action_scale * self.actions
             edge = self.synergy[:, :1]
             target += self.synergy @ self.synergy_rad

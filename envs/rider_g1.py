@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 
-from isaaclab.actuators import DCMotorCfg, ImplicitActuatorCfg
+from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.utils import replace
 from isaaclab_assets.robots.unitree import G1_29DOF_CFG
@@ -32,23 +32,38 @@ PASSIVE_GROUPS = {"_hand_": 14, "wrist": 6}  # DoF-name substring -> DoF count
 
 
 def implicit_actuators() -> dict:
-    """G1_29DOF_CFG's drives as PhysX implicit drives: the same stiffness, damping, armature, torque and speed limits.
+    """Unitree's deployment gains for the G1 29-DoF (unitree_rl_lab UNITREE_G1_29DOF_CFG), as PhysX implicit drives.
 
-    Isaac Lab's explicit DC-motor path fails CUDA-graph capture next to the binding loop, so the legs and feet run
-    implicit too. Lost: the DC motor's torque-speed curve (saturation 180 / 80 N·m, above the 88-139 / 50 N·m limits
-    except at high joint speed).
+    Isaac Lab's G1_29DOF_CFG drives the waist at kp 5000 and the arms at 3000 with 300 N·m: far stiffer and stronger
+    than the real motors, and nearly undamped (the torso rang). These are the gains Unitree deploys with, so a policy
+    trained here sees the controller it would run on. Torque limits are the motors' (waist roll/pitch and ankles: two
+    5020 motors on a linkage, 50 N·m, as Isaac Lab and Unitree's mimic config).
     """
-    out = {}
-    for name, act in G1_29DOF_CFG.actuators.items():
-        if isinstance(act, DCMotorCfg):
-            out[name] = ImplicitActuatorCfg(
-                joint_names_expr=act.joint_names_expr, stiffness=act.stiffness, damping=act.damping,
-                armature=act.armature, joint_effort_limit=act.actuator_effort_limit,
-                joint_velocity_limit=act.actuator_velocity_limit,
-            )
-        else:
-            out[name] = act
-    return out
+    arm = 0.01
+    return {
+        "hip_pitch_yaw": ImplicitActuatorCfg(
+            joint_names_expr=[".*_hip_pitch_joint", ".*_hip_yaw_joint"], stiffness=100.0, damping=2.0,
+            armature=arm, joint_effort_limit=88.0, joint_velocity_limit=32.0),
+        "hip_roll_knee": ImplicitActuatorCfg(
+            joint_names_expr=[".*_hip_roll_joint", ".*_knee_joint"],
+            stiffness={".*_hip_roll_joint": 100.0, ".*_knee_joint": 150.0},
+            damping={".*_hip_roll_joint": 2.0, ".*_knee_joint": 4.0},
+            armature=arm, joint_effort_limit=139.0, joint_velocity_limit=20.0),
+        "waist_yaw": ImplicitActuatorCfg(
+            joint_names_expr=["waist_yaw_joint"], stiffness=200.0, damping=5.0, armature=arm,
+            joint_effort_limit=88.0, joint_velocity_limit=32.0),
+        "ankles_waist": ImplicitActuatorCfg(
+            joint_names_expr=[".*_ankle_.*_joint", "waist_roll_joint", "waist_pitch_joint"], stiffness=40.0,
+            damping={".*_ankle_.*": 2.0, "waist_.*": 5.0}, armature=arm, joint_effort_limit=50.0,
+            joint_velocity_limit=37.0),
+        "arms": ImplicitActuatorCfg(
+            joint_names_expr=[".*_shoulder_.*_joint", ".*_elbow_joint", ".*_wrist_roll_joint"], stiffness=40.0,
+            damping=1.0, armature=arm, joint_effort_limit=25.0, joint_velocity_limit=37.0),
+        "wrists": ImplicitActuatorCfg(
+            joint_names_expr=[".*_wrist_pitch_joint", ".*_wrist_yaw_joint"], stiffness=40.0, damping=1.0,
+            armature=arm, joint_effort_limit=5.0, joint_velocity_limit=22.0),
+        "hands": G1_29DOF_CFG.actuators["hands"],
+    }
 
 
 def rider_cfg(stance: dict | None = None, world_pins: dict | None = None, solver_iterations: tuple[int, int] = (32, 4),
