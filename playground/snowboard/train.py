@@ -1,11 +1,12 @@
 """Train the snowboarder to carve with PPO.
 
-    scripts/py playground/snowboard/train.py --rewards playground/snowboard/rewards/stage2.yaml --set slope_deg=7
-    scripts/py playground/snowboard/train.py --init_from logs/playground/snowboard/<run>   # warm start
+    scripts/py playground/snowboard/train.py --stage stage2                                  # from scratch
+    scripts/py playground/snowboard/train.py --stage stage3 --init_from <stage 2 run>        # warm start
 
-Usually run through the stage scripts (scripts/train_stage*.sh). --rewards sets the reward weights from a YAML,
---set overrides any SnowboardEnvCfg field (rewards.<name> for a reward). --livestream 2 streams env 0 to the Isaac
-Sim WebRTC client. Runs land in logs/playground/snowboard/<time>_ppo_carve/.
+Every knob and its default: playground/snowboard/env.yaml; what a stage changes: playground/snowboard/stages/.
+--set key=value overrides an env.yaml key for one run (rewards.key=value for a reward). --livestream 2 streams env 0
+to the Isaac Sim WebRTC client. Runs land in logs/playground/snowboard/<time>_ppo_carve/; their run.yaml records the
+full settings.
 """
 
 import argparse

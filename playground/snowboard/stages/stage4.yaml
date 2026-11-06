@@ -1,0 +1,6 @@
+# Stage 4, tighter turns (warm-started from stage 3): switch edges earlier, so each turn ends without the overshoot.
+# Only what differs from env.yaml (the stage 3 setup).
+
+env:
+  edge_cmd_heading_deg: 40      # switch at 40° across the hill instead of 50°
+  edge_cmd_center_max_deg: 10   # smaller centring shift, so the switch heading stays near 40°

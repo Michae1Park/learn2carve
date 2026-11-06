@@ -1,0 +1,18 @@
+# Stage 2, change edges (from scratch): get from one edge to the other without falling.
+# Starts already in a carve, the edge command on a timer at lower edge angles, gentler slope, shorter episodes.
+# Only what differs from env.yaml (the stage 3 setup).
+
+env:
+  slope_deg: 7
+  episode_length_s: 10
+  carve_start: true             # start balanced on an edge (80% toe), the command at that side's peak
+  edge_cmd_mode: timer          # heel ↔ toe on a timer
+  edge_cmd_amp_deg: [15, 30]    # a 50° edge can't balance at these speeds
+  edge_cmd_period_s: [6.0, 4.0]
+  edge_cmd_max_s: 3.0
+  edge_cmd_center_deg_per_m: 0
+  rsi_frac: 0.5
+
+rewards:
+  grab: 5
+  grab_linear_m: 0              # Gaussian, grab_sigma_m 0.6

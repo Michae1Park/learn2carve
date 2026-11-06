@@ -2,6 +2,8 @@ task: carve
 algo: ppo
 seed: 42
 overrides:
+  edge_cmd_max_s: 3.0
+  edge_cmd_center_deg_per_m: 0.0
   edge_target_deg: 40
   binding_angles_deg:
   - 54

@@ -8,6 +8,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CFG_DIR = ROOT / "playground/snowboard"
+ENV_YAML = CFG_DIR / "env.yaml"
+STAGE_DIR = CFG_DIR / "stages"
 LOG_ROOT = ROOT / "logs/playground/snowboard"
 DEFAULT_CHECKPOINT = "best_agent.pt"
 sys.path.insert(0, str(ROOT))
@@ -18,10 +20,10 @@ def add_train_args(parser, default_timesteps: int | None = None):
     parser.add_argument("--num_envs", type=int, default=None, help="default: from <algo>.yaml")
     parser.add_argument("--timesteps", type=int, default=default_timesteps,
                         help="env steps per env; default: " + (str(default_timesteps) if default_timesteps else "from <algo>.yaml"))
-    parser.add_argument("--rewards", type=Path, default=None, metavar="YAML",
-                        help="reward weights, e.g. playground/snowboard/rewards/stage3.yaml; default: RewardsCfg")
+    parser.add_argument("--stage", default=None, metavar="NAME|YAML",
+                        help="stage2, stage3, stage4 (playground/snowboard/stages/) or a YAML path; default: env.yaml")
     parser.add_argument("--set", nargs="*", action="extend", default=[], metavar="KEY=VALUE",
-                        help="env cfg overrides, see env.py; rewards.<name>=... for a reward; may repeat")
+                        help="one-off overrides of env.yaml keys; rewards.<key>=... for a reward; may repeat")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--init_from", type=Path, default=None, metavar="RUN[/FILE]",
                         help="warm start: load policy, value and normalisers from a run's checkpoint "
@@ -52,6 +54,27 @@ def parse_overrides(pairs: list[str]) -> dict:
     return out
 
 
+def read_settings(path: Path) -> dict:
+    """{"env": {...}, "rewards": {...}} from an env.yaml-style file."""
+    data = yaml.safe_load(Path(path).read_text()) or {}
+    return {"env": data.get("env") or {}, "rewards": data.get("rewards") or {}}
+
+
+def stage_file(stage: str) -> Path:
+    path = Path(stage)
+    return path if path.suffix else STAGE_DIR / f"{stage}.yaml"
+
+
+def settings_overrides(settings: dict) -> dict:
+    """Settings as one dict of cfg keys, rewards as rewards.<key>."""
+    return {f"rewards.{k}": v for k, v in settings["rewards"].items()} | settings["env"]
+
+
+def apply_settings(cfg, settings: dict):
+    for key, value in settings_overrides(settings).items():
+        set_field(cfg, key, tuple(value) if isinstance(value, list) else value)
+
+
 def load_agent_cfg(algo: str, cfg_dir: Path = CFG_DIR) -> dict:
     return yaml.safe_load((cfg_dir / f"{algo}.yaml").read_text())
 
@@ -65,13 +88,20 @@ def new_run(args, task: str, cfg_dir: Path = CFG_DIR, log_root: Path = LOG_ROOT,
         "task": task,
         "algo": args.algo,
         **extra,
-        "rewards": yaml.safe_load(args.rewards.read_text()) if args.rewards else {},
-        "overrides": parse_overrides(args.set),
+        **run_settings(args.stage, args.set),
         "num_envs": args.num_envs or agent_cfg["num_envs"],
         "timesteps": args.timesteps or agent_cfg["timesteps"],
     }
     (run_dir / "run.yaml").write_text(yaml.safe_dump(run, sort_keys=False))
     return run_dir, run, agent_cfg
+
+
+def run_settings(stage: str | None, pairs: list[str]) -> dict:
+    """What a run.yaml records: env.yaml, then the stage file, then --set; complete, so a replay needs no env.yaml."""
+    base = read_settings(ENV_YAML)
+    changes = read_settings(stage_file(stage)) if stage else {"env": {}, "rewards": {}}
+    return {"stage": stage, "rewards": base["rewards"] | changes["rewards"],
+            "overrides": base["env"] | changes["env"] | parse_overrides(pairs)}
 
 
 def run_overrides(run: dict) -> dict:

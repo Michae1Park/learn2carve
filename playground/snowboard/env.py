@@ -2,7 +2,7 @@
 
 The env commands a signed edge angle (heel < 0, toe > 0), on a timer or once the turn has come round; the board's
 sidecut turns whatever edge the rider holds, so a command that alternates draws an S. Crossing a fence ends the
-episode. Reward weights: RewardsCfg, set per stage from playground/snowboard/rewards/*.yaml. See docs/RL_TRAINING.md.
+episode. Every knob and its default: env.yaml; what each stage changes: stages/*.yaml. See docs/RL_TRAINING.md.
 
 Import after Isaac Sim launched.
 """
@@ -10,6 +10,7 @@ Import after Isaac Sim launched.
 from __future__ import annotations
 
 import math
+from dataclasses import MISSING, fields
 
 import torch
 
@@ -19,6 +20,7 @@ from isaaclab.utils.math import quat_apply, quat_apply_inverse
 from envs.carve_env import GRAVITY, CarveEnv, CarveEnvCfg, base_obs_size, num_dof
 from envs.mountain import FENCE_HALF_WIDTH
 from envs.snow import board_frame
+from playground.common import ENV_YAML, apply_settings, read_settings
 
 TASK_OBS = 19
 SYNERGY_OBS = 2
@@ -54,84 +56,71 @@ def coin(n: int, device, p: float = 0.5) -> torch.Tensor:
 
 @configclass
 class RewardsCfg:
-    """Weights (per second, fall once) and term shapes; each stage sets them from rewards/<stage>.yaml."""
+    """Reward weights and term shapes. Values: env.yaml → rewards, changed per stage by stages/*.yaml."""
 
-    edge_cmd = 30.0  # track the commanded edge
-    edge_cmd_sigma_deg = 30.0
-    edge_side = 20.0  # on the commanded side
-    pose_ref = 10.0  # legs and COM lean of the double pendulum (scripts/pendulum_rl.py)
-    pose_ref_legs = 1.15
-    pose_ref_com = 0.77
-    pose_ref_sigma_deg = 15.0
-    rise = 30.0  # stand tall while the command crosses flat
-    tilt = -10.0  # torso bowed past tilt_free_deg
-    tilt_free_deg = 50.0
-    grab = 10.0  # inside hand toward its grab point on the board
-    grab_sigma_m = 0.6
-    grab_linear_m = 1.2  # > 0: linear falloff instead of the Gaussian
-    fall = -50.0  # once, a fall or a fence
+    edge_cmd: float = MISSING
+    edge_cmd_sigma_deg: float = MISSING
+    edge_side: float = MISSING
+    pose_ref: float = MISSING
+    pose_ref_legs: float = MISSING
+    pose_ref_com: float = MISSING
+    pose_ref_sigma_deg: float = MISSING
+    rise: float = MISSING
+    tilt: float = MISSING
+    tilt_free_deg: float = MISSING
+    grab: float = MISSING
+    grab_linear_m: float = MISSING
+    grab_sigma_m: float = MISSING
+    fall: float = MISSING
 
 
 @configclass
 class SnowboardEnvCfg(CarveEnvCfg):
-    episode_length_s = 12.0
-    observation_space = 87 + 28 + TASK_OBS  # recomputed from the DoF
-    action_scale = 0.25
-    mountain = True
-    fall_height = 0.15
+    """Fields without a value here are read from env.yaml (with comments there); stages/*.yaml change some."""
 
+    observation_space = 87 + 28 + TASK_OBS  # recomputed from the DoF
+    mountain = True
+    fence_half_width: float = FENCE_HALF_WIDTH  # the visual fences stand here
     rewards: RewardsCfg = RewardsCfg()
 
-    # rider: the same in every stage (docs/HUMANOID_MODEL.md §6); stance and bindings come from envs/physical.yaml
-    stance_tag = "squat4"
-    rider_to_height = True
-    pelvis_mass_frac = 0.2
-    knee_rotation = True
-    passive_joints = ("knee:2",)
-    ankle_range_deg = {"x": 45, "y": 80, "z": 55}
-    torso_twist_deg = 90.0
-    arm_stiffness_scale = 0.3
-    arm_action_scale = 0.5
-    stiff_boots = True
-    boot_range_deg = {"y": [-5, 15], "x": [-5, 5], "z": [-5, 5]}
-    synergy = True
-    synergy_toe_rad = {"left_knee": 0.4, "right_knee": 0.4, "left_hip_y": -0.3, "right_hip_y": -0.3}
-    synergy_smooth = 0.35
-    joint_smooth = 0.35
+    run_length: float | None = MISSING
+    start_speed_turns: tuple[float, float] = MISSING
+    start_heading_deg: float = MISSING
+    carve_start: bool = MISSING
+    carve_start_toe_frac: float = MISSING
+    speed_cmd: tuple[float, float] = MISSING
+    lying_deg: float = MISSING
+    reverse_slip_deg: float = MISSING
+    min_turn_deg: float = MISSING
 
-    speed_cmd = (6.0, 8.0)  # m/s, observed only (saved policies were trained with it)
-    start_heading_deg = 20.0
-    start_speed_turns = (4.0, 6.0)  # m/s
-    carve_start: bool = False  # start each episode balanced on an edge
-    carve_start_toe_frac = 0.5
-    fence_half_width = FENCE_HALF_WIDTH
-    run_length: float | None = None  # m, ends the episode as a time-out
-    min_turn_deg = 55.0  # swing that makes a turn count when the path crosses back over the fall line
-    lying_deg = 95.0  # torso tilt; a deep toe carve bows it 55-70°
-    reverse_slip_deg = 100.0  # tail first at speed counts as a fall
+    edge_cmd_mode: str = MISSING
+    edge_cmd_amp_deg: tuple[float, float] = MISSING
+    edge_cmd_period_s: tuple[float, float] = MISSING
+    edge_cmd_sharpness: float = MISSING
+    edge_cmd_heading_deg: float = MISSING
+    edge_cmd_center_deg_per_m: float = MISSING
+    edge_cmd_center_max_deg: float = MISSING
+    edge_cmd_min_s: float = MISSING
+    edge_cmd_max_s: float = MISSING
+    edge_cmd_ramp_s: float = MISSING
+    edge_cmd_hold: bool = MISSING
+    edge_cmd_level_init: float = MISSING
+    edge_cmd_level_fixed: bool = MISSING
+    edge_cmd_level_up_deg: float = MISSING
+    edge_cmd_level_steps: int = MISSING
 
-    # edge command: a signed edge angle to track, heel → base → toe
-    edge_cmd_hold: bool = False  # hold the start edge for the whole episode (scripts/switch_test.py)
-    edge_cmd_amp_deg = (20.0, 50.0)  # curriculum level 0 → 1
-    edge_cmd_period_s = (4.6, 4.0)  # level 0 → 1, ±15 % per episode
-    edge_cmd_level_init = 0.0
-    edge_cmd_level_fixed = False
-    edge_cmd_level_up_deg = 12.0
-    edge_cmd_level_steps = 2000
-    edge_cmd_mode = "timer"  # "timer": periodic. "heading": switch once the turn reaches edge_cmd_heading_deg
-    edge_cmd_sharpness = 1.8
-    edge_cmd_heading_deg = 50.0
-    edge_cmd_min_s = 1.0
-    edge_cmd_max_s = 3.0
-    edge_cmd_ramp_s = 0.6
-    edge_cmd_center_deg_per_m = 0.0  # heading mode: shift the switch heading to steer back to the piste centre
-    edge_cmd_center_max_deg = 25.0
+    rsi_frac: float = MISSING
+    rsi_min_s: float = MISSING
+    rsi_toe_deg: float = MISSING
+    rsi_buffer: int = MISSING
 
-    # reset from recorded mid-episode toe carves, so toe → heel is practised where riders get stuck
-    rsi_frac = 0.0
-    rsi_buffer = 8192
-    rsi_min_s = 3.0
-    rsi_toe_deg = 12.0
+    def __post_init__(self):
+        super().__post_init__()
+        apply_settings(self, read_settings(ENV_YAML))
+        unset = [f.name for f in fields(self) if getattr(self, f.name) is MISSING]
+        unset += [f"rewards.{f.name}" for f in fields(self.rewards) if getattr(self.rewards, f.name) is MISSING]
+        if unset:
+            raise ValueError(f"{ENV_YAML} sets no value for: {', '.join(unset)}")
 
 
 class SnowboardEnv(CarveEnv):

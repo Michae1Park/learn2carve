@@ -1,5 +1,5 @@
-# learn2carve — physical facts: rider, board, snow (loaded by envs/physical.py). Training settings live elsewhere:
-# SnowboardEnvCfg, scripts/train_stage*.sh, playground/snowboard/rewards/. ALL VALUES IN SI UNITS (m, kg, s, deg). Source specs mix cm and mm, so originals are kept in comments.
+# learn2carve — physical facts: rider, board, snow (loaded by envs/physical.py). Training knobs live in
+# playground/snowboard/env.yaml. ALL VALUES IN SI UNITS (m, kg, s, deg). Source specs mix cm and mm, so originals are kept in comments.
 
 rider:                    # the AMP humanoid, scaled to this rider
   height: 1.65            # 165 cm, applied with rider_to_height=true (stock humanoid is 1.612 m)

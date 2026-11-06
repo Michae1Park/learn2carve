@@ -1,0 +1,5 @@
+# Stage 3, full S (warm-started from stage 2): link turns into an S that stays on the piste.
+# Starts flat, the edge command switches on heading, steered toward the centre. This is the env.yaml setup.
+
+env: {}
+rewards: {}
