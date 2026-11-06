@@ -101,6 +101,7 @@ def main():
                                                   if body[i] and abs(offset[i]) > 0.02))
 
         stance["joint_target"] = {n: round(float(v), 5) for n, v in zip(names, target[0])}
+        stance["joint_target_gains"] = "unitree"  # solved for these drives; the env ignores them under other gains
         out = stance_file(angles, args.tag)
         text = out.read_text().split("\n", 1)[0] + "\n" + yaml.safe_dump(stance, sort_keys=False)
         out.write_text(text)

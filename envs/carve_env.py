@@ -116,6 +116,7 @@ class CarveEnvCfg(DirectRLEnvCfg):
     start_yaw_deg = 0.0
 
     # rider model, see docs/HUMANOID_MODEL.md
+    g1_gains: str = "unitree"  # g1 drives: unitree (deployment gains) or isaac (Isaac Lab's stock, the first 60/50 runs)
     robot: str = "amp"  # amp (edited AMP humanoid) or g1 (stock Unitree G1, envs/rider_g1.py, envs/physical_g1.yaml)
     physics_hz: int = 120
     solver_iterations: tuple[int, int] = (32, 4)
@@ -207,7 +208,9 @@ def apply_rider_options(cfg: CarveEnvCfg) -> None:
     if cfg.observation_space == 81 + 6:
         cfg.observation_space = base_obs_size(cfg)
     physical.select(cfg.robot)
+    robot_options = {"gains": cfg.g1_gains} if cfg.robot == "g1" else {}
     cfg.scene.robot = profile(cfg).rider_cfg(
+        **robot_options,
         stance=load_stance(configured_binding_angles(cfg), cfg.stance_tag),
         binding_angles=configured_binding_angles(cfg),
         solver_iterations=tuple(cfg.solver_iterations),
@@ -274,7 +277,8 @@ class CarveEnv(DirectRLEnv):
         # hold the pose under gravity; otherwise the stance itself
         self.stance_target = self.stance_pos.clone()
         names = self.robot.joint_names
-        for name, value in stance.get("joint_target", {}).items():
+        targets = stance.get("joint_target", {}) if stance.get("joint_target_gains", "unitree") == self.cfg.g1_gains else {}
+        for name, value in targets.items():
             if name in names:
                 self.stance_target[:, names.index(name)] = value
         self.pelvis_in_board_pos = torch.tensor(stance["pelvis_pos"], device=self.device)

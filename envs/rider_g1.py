@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 
-from isaaclab.actuators import ImplicitActuatorCfg
+from isaaclab.actuators import DCMotorCfg, ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.utils import replace
 from isaaclab_assets.robots.unitree import G1_29DOF_CFG
@@ -66,10 +66,29 @@ def implicit_actuators() -> dict:
     }
 
 
+def isaac_actuators() -> dict:
+    """Isaac Lab's G1_29DOF_CFG drives as implicit drives (its explicit DC-motor path fails CUDA-graph capture here).
+
+    Stiffer and stronger than the real robot (waist kp 5000, arms 3000 at 300 N·m): the first 60/50 runs trained on
+    these. Kept so their checkpoints can be continued; new work uses implicit_actuators (Unitree's gains).
+    """
+    out = {}
+    for name, act in G1_29DOF_CFG.actuators.items():
+        if isinstance(act, DCMotorCfg):
+            out[name] = ImplicitActuatorCfg(
+                joint_names_expr=act.joint_names_expr, stiffness=act.stiffness, damping=act.damping,
+                armature=act.armature, joint_effort_limit=act.actuator_effort_limit,
+                joint_velocity_limit=act.actuator_velocity_limit,
+            )
+        else:
+            out[name] = act
+    return out
+
+
 def rider_cfg(stance: dict | None = None, world_pins: dict | None = None, solver_iterations: tuple[int, int] = (32, 4),
               binding_angles: tuple[float, float] | None = None, stance_width: float | None = None,
-              board_flex: bool = False, **_amp_only) -> ArticulationCfg:
-    """Same signature as envs.rider.rider_cfg; AMP-only options are ignored."""
+              board_flex: bool = False, gains: str = "unitree", **_amp_only) -> ArticulationCfg:
+    """Same signature as envs.rider.rider_cfg; AMP-only options are ignored. gains: unitree (deployment) or isaac."""
     cfg = physical.load()
     board, rider = dict(cfg["board"]), dict(cfg["rider"])
     if binding_angles:
@@ -110,7 +129,7 @@ def rider_cfg(stance: dict | None = None, world_pins: dict | None = None, solver
             pos=tuple(stance["pelvis_pos"]), rot=tuple(stance["pelvis_quat"]), joint_pos=joints,
         )
     return replace(G1_29DOF_CFG, prim_path="{ENV_REGEX_NS}/Robot", spawn=spawn, init_state=init,
-                   actuators=implicit_actuators())
+                   actuators=isaac_actuators() if gains == "isaac" else implicit_actuators())
 
 
 def stance_guess(knee: float, hip_y: float, ankle_y: float, twist: float, angles, open_deg: float) -> dict:
