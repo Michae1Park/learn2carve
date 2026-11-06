@@ -28,8 +28,8 @@ thin line in the snow.
 
 | | Skidded turn | Carved turn | Trained rider |
 |---|---|---|---|
-| Edge angle | low | 40°+ | toe 42° / heel 38° mean, up to 52° |
-| Slip | large | ~0 | 2.5–3° |
+| Edge angle | low | 40°+ | toe 43° / heel 38° mean, up to 57° (stage 4) |
+| Slip | large | ~0 | ~3° |
 | Track | smeared | thin line | thin S, 4–5 turns per 100 m |
 
 A high edge angle needs speed (a 40°+ edge only balances above ~7 m/s, [§1](#1-the-edge-command-a-target-the-rider-tracks)),
@@ -40,7 +40,7 @@ which is why the slope steepens and the target angles rise together as the stage
 | Idea | In short |
 |---|---|
 | **Track a command, don't reward turning** | The env gives the rider a target edge angle each step. Rewards for turning, speed and carving all ended with one deep edge held into the fence; a target that alternates heel ↔ toe draws the S directly ([§1](#1-the-edge-command-a-target-the-rider-tracks)) |
-| **Start from a good pose** | The rider's neutral pose is a snowboarder's base position: a squat, knees bent, over the board. Every action is a small change around it, so before it can carve it has to hold that position. Starts in stage 2 are already on an edge, so the policy spends its time on the switch and not on getting up ([humanoid model](HUMANOID_MODEL.md#4-stance-scriptsmake_stancepy)) |
+| **Start from a good pose** | The rider's neutral pose is a snowboarder's base position: a squat, knees bent, over the board. Every action is a small change around it, and zero action holds it. Stage 2 episodes start already on an edge, so a carve does not have to be built from standing ([humanoid model](HUMANOID_MODEL.md#4-stance-scriptsmake_stancepy)) |
 | **Add a hint for balance** | A reward for reaching the inside hand toward the board edge (counter-angulation), which is what human riders learn for balance at high edge angles ([§3](#3-reward)) |
 
 ### One training step
@@ -73,7 +73,7 @@ The sidecut radius is $`R_{sc}`$ = 7.6 m ([board model §1](BOARD_MODEL.md#1-geo
 \sin\theta = \frac{v^2}{g\cos\alpha \cdot R_{sc}}
 ```
 
-which is 20° at 5 m/s and 41° at 7 m/s on a 9° slope. A 40°+ edge only balances above ~7 m/s, so edge angle and speed
+which is 20° at 5 m/s and 42° at 7 m/s on a 9° slope. A 40°+ edge only balances above ~7 m/s, so edge angle and speed
 have to rise together.
 
 **Why a command and not a reward for turning.** Five runs that rewarded turns, speed and carving (with a guide S to
@@ -101,7 +101,7 @@ The 140 numbers the network reads, the 30 numbers it outputs, and the processing
 |  |  | Torso height | 1 | $`h`$ | Root height above the snow |
 |  |  | Torso orientation | 6 | $`(\mathbf{t},\ \mathbf{n})`$ | Root frame as tangent and normal vectors, 3 + 3 |
 |  |  | Torso velocity | 3 + 3 | $`\mathbf{v},\ \boldsymbol{\omega}`$ | Linear and angular velocity |
-|  |  | Hands and feet | 12 | $`\mathbf{p}_k - \mathbf{p}_{\mathrm{root}}`$ | Positions of the right hand, left hand, right foot and left foot relative to the root, in the world frame (x, y, z each) |
+|  |  | Hands and feet | 12 | $`\mathbf{p}_k - \mathbf{p}_{\mathrm{root}}`$ | Positions of the right hand, left hand, right foot and left foot relative to the root, in the slope frame (x, y, z each) |
 |  | Board | Edge angle | 1 | $`\theta`$ | Roll relative to the snow |
 |  |  | Velocity | 2 | $`v_\parallel,\ v_\perp`$ | Along and across the board |
 |  |  | Yaw rate | 1 | $`\dot\psi_b`$ | Board rotation about the snow normal |
@@ -186,9 +186,7 @@ Within a policy step the target $`q^\ast`$ is **held fixed**: the policy does no
 done. The simulation does not stand still, though: at every substep the PD drives recompute their torques from the
 joints' current angles, and the snow model recomputes its forces from the board's current motion.
 
-The split is deliberate. A decision every 33 ms is plenty for a rider whose edge change takes 0.8–1.1 s (24–33 policy
-steps), and it keeps the network and PPO's data 4× smaller. The physics needs the finer step: stiff PD joints, contact
-and the snow model's grip spring are not stable at 33 ms.
+The env requires the physics rate to be a multiple of the policy rate (here 4 × 30 Hz).
 
 ## 3. Reward
 
@@ -405,7 +403,7 @@ Over each 48-step rollout, with the critic $`V`$, $`\gamma = 0.995`$ and $`\lamb
 ```
 
 $`d_t = 1`$ after a fall or a fence, and 0 otherwise: a time-out is bootstrapped through $`V(s_{t+1})`$. Advantages are
-normalized over the batch.
+normalized over the batch. The sum in $`\hat A_t`$ stops at the end of an episode.
 
 $`\gamma = 0.995`$ sets how far ahead reward counts (a ~6.7 s horizon, more than one S). $`\lambda = 0.98`$ sets how far
 back the credit for a surprise is spread: $`\delta_t`$ is a one-step surprise, and $`\hat A_t`$ adds the next steps' surprises
@@ -472,7 +470,7 @@ gradient.
 | Envs | 2048 in parallel |
 | Rollout | 48 steps (1.6 s, an edge change fits) × 2048 = **98k samples per update** |
 | Update | 5 epochs × 8 mini-batches |
-| Training | 16 000 steps per env per run (~26 min on one GPU) |
+| Training | 16 000 steps per env per run |
 | Networks | Policy and value: separate MLPs, 512-256-128, ELU |
 | Policy | Gaussian, initial std $`e^{-1}`$, capped at $`e^{-0.3}`$ (it had grown to ~6 against clipped actions) |
 | Discount, GAE | $`\gamma`$ = 0.995 (~6.7 s, more than one S), $`\lambda`$ = 0.98 |
@@ -490,11 +488,11 @@ must first learn to *switch* edges, then to ride a course on switching, then to 
 | | **Stage 1: hold a carve** | **Stage 2: change edges** | **Stage 3: full S** | **Stage 4: tighter turns** |
 |---|---|---|---|---|
 | Learns | Balance on one edge | Get from one edge to the other without falling | Link turns into an S that stays on the trail | End each turn sooner, without the overshoot |
-| Start | In a carve | In a carve (80% toe), 4–5.5 m/s; 50% from recorded toe-carve states | Riding flat, ±20° of the fall line, 4–5.5 m/s; 30% from recorded states | As stage 3 |
+| Start | In a carve at the balanced edge, 5–7.5 m/s | In a carve (80% toe), 4–5.5 m/s; 50% from recorded toe-carve states | Riding flat, ±20° of the fall line, 4–5.5 m/s; 30% from recorded states | As stage 3 |
 | Edge command | One fixed side, at the balanced edge | **Timed**: heel ↔ toe, period $`T`$ 6 → 4 s | **Heading**: switch at 50° across the hill, centering up to 25° | Switch at **40°**, centering up to 10° |
 | Edge angle | Balanced edge | ±15 → 30° | ±25 → 45° | As stage 3 |
-| Slope, episode | | 7°, 10 s | 9°, 20 s | As stage 3 |
-| Reward | | Hand grab weight 5, Gaussian | Hand grab weight 10, linear (§3) | As stage 3 |
+| Slope, episode | 7°, 4 s | 7°, 10 s | 9°, 20 s | As stage 3 |
+| Reward | Edge tracking, pose reference, fall −10 | Hand grab weight 5, Gaussian | Hand grab weight 10, linear (§3) | As stage 3 |
 | Saved run | none (dropped) | `saved/01_stage2_switches` | `saved/03_stage3_centred` | `saved/04_stage3_tighter` |
 
 ### The command generators and the curriculum
@@ -516,8 +514,10 @@ running edge error is below 12° and falls above 24°. The policy sees the comma
 
 ### Stage 1: hold a carve (dropped)
 
-The first attempt only asked the rider to balance on one edge: the command was a fixed side at the edge that balances
-the current speed ($`\sin\theta = v^2 / g\cos\alpha R_{sc}`$, §1). Holding worked, but it was a **local optimum**. The
+The first attempt only asked the rider to balance on one edge: every episode started in a carve, and the command held
+that side at the edge that balances the current speed ($`\sin\theta = v^2 / g\cos\alpha R_{sc}`$, §1). A held carve
+circles back up the hill, so episodes were short (4 s). Holding worked (edge error 5.2°, 22% falls, 13% fence at the
+end of training), but it was a **local optimum**. The
 policy that held one edge never needed to leave it, so when stage 2 was warm-started from it, it kept holding the edge
 stage 1 had taught and never learned to change edges. Stage 2 from scratch learns the hold anyway, because its episodes
 start in a carve, so stage 1 was removed.
@@ -546,7 +546,7 @@ side's peak, so the first seconds are a hold and the first switch comes when the
 states are recorded and 50% of episodes restart from them ("recorded-state starts" below).
 
 **Curriculum.** Amplitude $`A`$ 15 → 30° and period $`T`$ 6 → 4 s. The level rises while the running edge error stays
-below 12° and falls above 24°. The speed is only 4–5.5 m/s here, which balances about 20°, so asking for more would
+below 12° and falls above 24°. The speed is only 4–5.5 m/s here, which balances 13–24°, so asking for much more would
 be asking for a fall (the ±50° run: 75% of falls were "lying").
 
 **Result.** Falls 8%, episodes 9.2 of 10 s, edge error 18°. Eval: toe → heel → toe → heel → toe → heel in one 11.6 s

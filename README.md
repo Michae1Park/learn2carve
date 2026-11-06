@@ -40,7 +40,7 @@ modified for snowboarding, and is trained with PPO in stages.
 - **Models** the snow, the board and their interaction (glide, sidecut steering, edge grip).
 - **Rider:** a modified AMP humanoid, strapped to the board through bindings.
 - **Reward:** designed to favor a high edge angle, a thin track and turns that finish across the hill.
-- **Training:** PPO in stages in Isaac Sim, up to full S turns at 30–50° edge angles.
+- **Training:** PPO in stages in Isaac Sim, up to full S turns at ~40° edge angles (mean toe 43°, heel 38°, up to 57°).
 
 ## Models
 
@@ -77,12 +77,13 @@ scripts/install.sh   # Isaac Sim 6.1 + Isaac Lab + skrl, into .venv-sim
 
 ```bash
 # Watch a trained rider carve
-scripts/py playground/snowboard/play.py saved/03_stage3_centred
+scripts/py playground/snowboard/play.py saved/04_stage3_tighter
 
 # ...with the live stream (Isaac Sim viewport)
-scripts/py playground/snowboard/play.py saved/03_stage3_centred --livestream 2 --follow
+scripts/py playground/snowboard/play.py saved/04_stage3_tighter --livestream 2 --follow
 
-# Train: stage 2 from scratch, then stage 3 warm-started from it
+# Train: stage 2 from scratch, then stage 3 and stage 4, each warm-started from the last
 scripts/py playground/snowboard/train.py --stage stage2
 scripts/py playground/snowboard/train.py --stage stage3 --init_from logs/playground/snowboard/<stage 2 run>
+scripts/py playground/snowboard/train.py --stage stage4 --init_from logs/playground/snowboard/<stage 3 run>
 ```
