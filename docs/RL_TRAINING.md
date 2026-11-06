@@ -220,6 +220,43 @@ Nothing rewards speed, staying alive, posture or style: survival pays only throu
 
 ## 5. PPO
 
+PPO maximises the discounted sum of the reward of §4, $J(\pi) = \mathbb{E}\left[\sum_t \gamma^t r_t\right]$. With the
+weights of stage 3 and $e = \theta - \theta^\ast$, each step pays
+
+$$r_t = \Delta t\Big[\,30\,g_e + 20\,g_s + 10\,g_p + 30\,g_r - 10\,g_t + 10\,g_h\Big] - 50\ \mathbb{1}[\text{fall or fence}]$$
+
+| | Term | |
+|---|---|---|
+| $g_e$ | Edge command | $e^{-(e/30°)^2}\cdot\mathrm{ramp}(\lvert\theta\rvert;\,10°,\,20°)$ |
+| $g_s$ | Edge side | $\mathrm{sign}(\theta)\,\mathrm{sign}(\theta^\ast)$ when $\lvert\theta^\ast\rvert > 10°$ and $\lvert\theta\rvert > 3°$, else 0 |
+| $g_p$ | Pose reference | the product of two Gaussians in §4, 0 when $\lvert\theta^\ast\rvert < 10°$ |
+| $g_r$ | Rise | $\mathbb{1}[\lvert\theta^\ast\rvert < 8°]\ \mathrm{clip}\big((h_{\mathrm{pelvis}} - 0.35)/0.2,\,0,\,1\big)$ |
+| $g_t$ | Tilt | $\mathrm{clip}\big((\text{torso tilt} - 50°)/20°,\,0,\,1\big)$ |
+| $g_h$ | Hand grab | $\mathrm{clip}(1 - d/1.2\ \mathrm{m},\,0,\,1)$ while on a heel or toe turn, else 0 |
+
+**Advantage (GAE).** Over each 48-step rollout, with the critic $V$, $\gamma = 0.995$ and $\lambda = 0.98$:
+
+$$\delta_t = r_t + \gamma\,(1 - d_t)\,V(s_{t+1}) - V(s_t) \qquad \hat A_t = \sum_{l \ge 0} (\gamma\lambda)^l\,\delta_{t+l} \qquad \hat R_t = \hat A_t + V(s_t)$$
+
+$d_t$ marks the end of an episode (a fall, a fence or a time-out); advantages are normalised over the batch.
+
+**Loss.** With the probability ratio $\rho_t = \pi_\theta(a_t \mid s_t)\,/\,\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t)$:
+
+$$\mathcal{L}_{\mathrm{clip}} = \mathbb{E}\Big[\min\big(\rho_t \hat A_t,\ \mathrm{clip}(\rho_t,\,1-\epsilon,\,1+\epsilon)\,\hat A_t\big)\Big] \qquad \epsilon = 0.2$$
+
+$$\mathcal{L}_V = c_v\ \mathbb{E}\Big[\big(\hat R_t - V_{\mathrm{clip}}(s_t)\big)^2\Big] \qquad V_{\mathrm{clip}} = V_{\mathrm{old}} + \mathrm{clip}\big(V - V_{\mathrm{old}},\ \pm 0.2\big) \qquad c_v = 1$$
+
+$$H(\pi) = \sum_{i=1}^{30} \left(\log\sigma_i + \tfrac12\log 2\pi e\right) \qquad \mathcal{L} = -\mathcal{L}_{\mathrm{clip}} + \mathcal{L}_V - c_H\,H(\pi) \qquad c_H = 0.003$$
+
+The policy is a diagonal Gaussian over the 30 actions, $a \sim \mathcal{N}\big(\mu_\theta(s),\ \mathrm{diag}\,\sigma^2\big)$, with a
+learned $\log\sigma$ per action. Observations and value targets pass through a running mean and standard deviation. The
+gradient norm is clipped at 1.0.
+
+**One update.** 48 steps × 2048 envs = 98k samples, split into 8 mini-batches of ~12k and swept 5 times: 40 gradient
+steps on each batch, then the batch is thrown away (on-policy). After each epoch the mean KL between old and new
+policy sets Adam's learning rate: it is divided by 1.5 when the KL goes above twice the 0.01 target and multiplied by
+1.5 when it falls below half.
+
 | Setting | Value |
 |---|---|
 | Envs | 2048 in parallel |
