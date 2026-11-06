@@ -47,27 +47,27 @@ which is why the slope steepens and the target angles rise together as the stage
 
 ![Training loop: policy at 30 Hz, PD joints, snow model and PhysX at 120 Hz, rewards, PPO update every 48 steps](rider/training_loop.svg)
 
-The env gives the rider a target edge angle $\theta^\ast$ (the *edge command*). The policy sees the body state and
-$\theta^\ast$, and outputs joint targets. The body tips the board, the [snow model](SNOW_MODEL.md) turns that edge into a
-turn, and the reward measures how close the edge came to $\theta^\ast$. PPO improves the policy from 2048 riders in
+The env gives the rider a target edge angle $`\theta^\ast`$ (the *edge command*). The policy sees the body state and
+$`\theta^\ast`$, and outputs joint targets. The body tips the board, the [snow model](SNOW_MODEL.md) turns that edge into a
+turn, and the reward measures how close the edge came to $`\theta^\ast`$. PPO improves the policy from 2048 riders in
 parallel. The policy does not plan a path: that lives in the command generator ([§1](#1-the-edge-command-a-target-the-rider-tracks)).
 The policy learns the body.
 
 ## 1. The edge command: a target the rider tracks
 
-**No line is laid on the snow.** Each step the env commands a signed edge angle $\theta^\ast$ (heel $< 0$, toe $> 0$).
+**No line is laid on the snow.** Each step the env commands a signed edge angle $`\theta^\ast`$ (heel $`< 0`$, toe $`> 0`$).
 The board's sidecut turns whatever edge the rider holds ([snow model §2](SNOW_MODEL.md#2-sidecut-steering)), so a
 command that alternates heel ↔ toe draws an S. The policy only has to learn the body: get the board onto that edge,
 hold it, and change it without falling, in a posture it can switch from (the pose, rise and grab terms of §4).
 
 | Quantity | Definition |
 |---|---|
-| Edge angle $\theta$ | Board roll relative to the snow surface ([snow model](SNOW_MODEL.md)) |
-| Path heading $\psi$ | $\mathrm{atan2}(v_y, v_x)$: travel direction, 0 = straight down the fall line. A heel edge turns $\psi$ up, a toe edge down |
-| Slip angle $\beta$ | Angle between the board's axis and its travel; ~0 when carving |
-| Balanced edge | The edge a rider can hold at speed $v$ on a slope $\alpha$ (formula below) |
+| Edge angle $`\theta`$ | Board roll relative to the snow surface ([snow model](SNOW_MODEL.md)) |
+| Path heading $`\psi`$ | $`\mathrm{atan2}(v_y, v_x)`$: travel direction, 0 = straight down the fall line. A heel edge turns $`\psi`$ up, a toe edge down |
+| Slip angle $`\beta`$ | Angle between the board's axis and its travel; ~0 when carving |
+| Balanced edge | The edge a rider can hold at speed $`v`$ on a slope $`\alpha`$ (formula below) |
 
-The sidecut radius is $R_{sc}$ = 7.6 m ([board model §1](BOARD_MODEL.md#1-geometry)). The balanced edge is
+The sidecut radius is $`R_{sc}`$ = 7.6 m ([board model §1](BOARD_MODEL.md#1-geometry)). The balanced edge is
 
 $$\sin\theta = \frac{v^2}{g\cos\alpha \cdot R_{sc}}$$
 
@@ -83,19 +83,19 @@ a fall penalty is learnable: it linked an edge change every 2 s at ±45–50°, 
 
 | Mode | Used in | Command |
 |---|---|---|
-| **Timed** | Stage 2 | A trapezoid heel → flat → toe, period $T$ |
-| **Heading** | Stages 3–4 | Hold one edge at $\pm A$ until the turn has come round ($\psi$ past the switch heading), then ramp through flat to the other edge over 0.6 s. Never sooner than 1 s, never later than 4 s on one edge |
+| **Timed** | Stage 2 | A trapezoid heel → flat → toe, period $`T`$ |
+| **Heading** | Stages 3–4 | Hold one edge at $`\pm A`$ until the turn has come round ($`\psi`$ past the switch heading), then ramp through flat to the other edge over 0.6 s. Never sooner than 1 s, never later than 4 s on one edge |
 | **Centering** | Stages 3–4 | The switch heading moves 2° per meter off the trail center (capped): the turn back toward the center runs longer, the one away from it ends sooner, so the S stays between the fences |
 
-In stages 3–4 the command is **closed-loop**: it reads the travel heading $\psi$ and the position across the trail, so
-the turn planner is hand-built into the env, and the policy sees $\psi$, its position and the command 0.3 s and 0.6 s
+In stages 3–4 the command is **closed-loop**: it reads the travel heading $`\psi`$ and the position across the trail, so
+the turn planner is hand-built into the env, and the policy sees $`\psi`$, its position and the command 0.3 s and 0.6 s
 ahead (§3).
 
-The timed command, with amplitude $A$ and random phase $\varphi$:
+The timed command, with amplitude $`A`$ and random phase $`\varphi`$:
 
 $$\theta^\ast(t) = A \cdot \mathrm{clip}\left(1.8\,\sin\left(\frac{2\pi t}{T} + \varphi\right),\ -1,\ 1\right)$$
 
-**Curriculum.** The amplitude $A$ and period $T$ step from easy to hard by a level in $[0, 1]$. It rises while the
+**Curriculum.** The amplitude $`A`$ and period $`T`$ step from easy to hard by a level in $`[0, 1]`$. It rises while the
 running edge error is below 12° and falls above 24°. The policy sees the command now, +0.3 s and +0.6 s.
 
 ## 2. Stages
@@ -108,7 +108,7 @@ must first learn to *switch* edges, then to ride a course on switching, then to 
 |---|---|---|---|---|
 | Learns | Balance on one edge | Get from one edge to the other without falling | Link turns into an S that stays on the trail | End each turn sooner, without the overshoot |
 | Start | In a carve | In a carve (80% toe), 4–5.5 m/s; 50% from recorded toe-carve states | Riding flat, ±20° of the fall line, 4–5.5 m/s; 30% from recorded states | As stage 3 |
-| Edge command | One fixed side, at the balanced edge | **Timed**: heel ↔ toe, period $T$ 6 → 4 s | **Heading**: switch at 50° across the hill, centering up to 25° | Switch at **40°**, centering up to 10° |
+| Edge command | One fixed side, at the balanced edge | **Timed**: heel ↔ toe, period $`T`$ 6 → 4 s | **Heading**: switch at 50° across the hill, centering up to 25° | Switch at **40°**, centering up to 10° |
 | Edge angle | Balanced edge | ±15 → 30° | ±25 → 45° | As stage 3 |
 | Slope, episode | | 7°, 10 s | 9°, 20 s | As stage 3 |
 | Reward | | Hand grab weight 5, Gaussian | Hand grab weight 10, linear (§4) | As stage 3 |
@@ -117,7 +117,7 @@ must first learn to *switch* edges, then to ride a course on switching, then to 
 ### Stage 1: hold a carve (dropped)
 
 The first attempt only asked the rider to balance on one edge: the command was a fixed side at the edge that balances
-the current speed ($\sin\theta = v^2 / g\cos\alpha R_{sc}$, §1). Holding worked, but it was a **local optimum**. The
+the current speed ($`\sin\theta = v^2 / g\cos\alpha R_{sc}`$, §1). Holding worked, but it was a **local optimum**. The
 policy that held one edge never needed to leave it, so when stage 2 was warm-started from it, it kept holding the edge
 stage 1 had taught and never learned to change edges. Stage 2 from scratch learns the hold anyway, because its episodes
 start in a carve, so stage 1 was removed.
@@ -126,18 +126,18 @@ start in a carve, so stage 1 was removed.
 
 **Goal.** Get from the toe edge to the heel edge and back without falling. Nothing about the course yet.
 
-**The command is a clock.** The target edge follows a trapezoid wave, heel ↔ toe, with amplitude $A$, period $T$ and a
-random phase $\varphi$ (§1). It holds the peak for about 60% of each half-period and crosses flat in the rest, so a
+**The command is a clock.** The target edge follows a trapezoid wave, heel ↔ toe, with amplitude $`A`$, period $`T`$ and a
+random phase $`\varphi`$ (§1). It holds the peak for about 60% of each half-period and crosses flat in the rest, so a
 switch takes roughly 0.8 to 1.1 s. The policy sees the command now, +0.3 s and +0.6 s, so it can start a switch
 before it is due.
 
 **The reward is the tracking error against that clock.** Your guess is right: each step the env computes
-$e = \theta - \theta^\ast(t)$, where $\theta^\ast$ changes sign on the timer, and pays $e^{-(e/30°)^2}$. Three more
+$`e = \theta - \theta^\ast(t)`$, where $`\theta^\ast`$ changes sign on the timer, and pays $`e^{-(e/30°)^2}`$. Three more
 terms stop the policy from collecting that reward the cheap way:
 
 | Term | What it prevents |
 |---|---|
-| Edge side (+1 / −1) | Staying on the old edge: starting the switch pays before the angle matches, because $\sigma$ = 30° alone paid nothing for crossing flat |
+| Edge side (+1 / −1) | Staying on the old edge: starting the switch pays before the angle matches, because $`\sigma`$ = 30° alone paid nothing for crossing flat |
 | Edge command × "edged" gate | Riding flat: a flat board never scores |
 | Rise | Crouching through the change: pay for pelvis height while the command is near flat |
 
@@ -145,7 +145,7 @@ terms stop the policy from collecting that reward the cheap way:
 side's peak, so the first seconds are a hold and the first switch comes when the clock turns. After 3 s, toe-carve
 states are recorded and 50% of episodes restart from them ("recorded-state starts" below).
 
-**Curriculum.** Amplitude $A$ 15 → 30° and period $T$ 6 → 4 s. The level rises while the running edge error stays
+**Curriculum.** Amplitude $`A`$ 15 → 30° and period $`T`$ 6 → 4 s. The level rises while the running edge error stays
 below 12° and falls above 24°. The speed is only 4–5.5 m/s here, which balances about 20°, so asking for more would
 be asking for a fall (the ±50° run: 75% of falls were "lying").
 
@@ -158,13 +158,13 @@ run. From a low toe carve the policy reaches the heel 75% of the time with 0% fa
 (the "edge change on a timer" lesson). The fix is to **make the command a function of the path**, so the S is built from
 turns that actually completed.
 
-**The command is a small state machine.** The env holds one edge at $\pm A$ until the travel direction $\psi$ has swung
+**The command is a small state machine.** The env holds one edge at $`\pm A`$ until the travel direction $`\psi`$ has swung
 past a switch heading, then ramps from wherever the command is to the other edge over 0.6 s:
 
 $$\theta^\ast = \theta_{\mathrm{from}} + (\pm A - \theta_{\mathrm{from}})\ \mathrm{clip}\left(\frac{t_{\mathrm{since\ switch}}}{0.6\ \mathrm{s}},\ 0,\ 1\right)$$
 
 The switch is allowed after 1 s on an edge and forced after 4 s. The reward is unchanged: it still pays
-$e^{-(e/30°)^2}$ on $e = \theta - \theta^\ast$, but now *when* $\theta^\ast$ flips depends on the board's own turn.
+$`e^{-(e/30°)^2}`$ on $`e = \theta - \theta^\ast`$, but now *when* $`\theta^\ast`$ flips depends on the board's own turn.
 
 **Start and slope.** The rider starts flat, heading within ±20° of the fall line, at 4–5.5 m/s. The slope goes from 7°
 to 9° and episodes from 10 to 20 s: the targets reach ±45°, and a 45° edge only balances above ~7 m/s, so the rider has
@@ -187,7 +187,7 @@ when the switch happens.
 ### Stage 4: tighter turns
 
 **Diagnosis.** In the stage 3 eval the heading at the switch reached 56–91° across the hill, though 50° was the target.
-The command flips only *after* $\psi$ passes the switch heading, and the board keeps swinging while the command ramps
+The command flips only *after* $`\psi`$ passes the switch heading, and the board keeps swinging while the command ramps
 through flat for 0.6 s.
 
 **Change.** Two numbers, no new reward and no new start: switch at **40°** instead of 50°, and cap the centering shift at
@@ -268,30 +268,30 @@ How each ending enters the return (the −50 on a fall or fence, the bootstrap t
 
 ## 4. Reward
 
-Each step, with $\Delta t = 1/30$ s and the edge error $e = \theta - \theta^\ast$:
+Each step, with $`\Delta t = 1/30`$ s and the edge error $`e = \theta - \theta^\ast`$:
 
 $$r = \Delta t \sum_i w_i r_i + w_{\mathrm{fall}}\ \mathbb{1}[\text{fall or fence}]$$
 
-Weights $w_i$ are those of stage 3.
+Weights $`w_i`$ are those of stage 3.
 
-| Term | $r_i$ | $w_i$ |
+| Term | $`r_i`$ | $`w_i`$ |
 |---|---|---|
-| **Edge command** | $e^{-(e/\sigma)^2}$, $\sigma$ = 30°, × 0 while the board is flat (edge < 10°, full from 20°): a flat board never pays | 30 |
+| **Edge command** | $`e^{-(e/\sigma)^2}`$, $`\sigma`$ = 30°, × 0 while the board is flat (edge < 10°, full from 20°): a flat board never pays | 30 |
 | **Edge side** | +1 on the commanded side, −1 on the other (command > 10°, edge > 3°): starting the switch pays before the angle matches | 20 |
 | **Pose reference** | Legs lean past the edge, center of mass lean less (angulation), from the pendulum model (formula below); 0 near flat | 10 |
 | **Rise** | While the command is within 8° of flat: clip((pelvis height − 0.35 m) / 0.2 m), i.e. come up through the edge change | 30 |
 | **Tilt** | clip((torso tilt − 50°) / 20°): a bow past ~65° can't get back to the heel | −10 |
-| **Hand grab** | clip(1 − $d$ / 1.2 m), $d$ the inside hand to its grab point (below). Counter-angulation for higher edges | 10 |
+| **Hand grab** | clip(1 − $`d`$ / 1.2 m), $`d`$ the inside hand to its grab point (below). Counter-angulation for higher edges | 10 |
 | **Fall** | Once, a fall or a fence | −50 |
 
-**Pose reference.** With $\phi_{\mathrm{legs}}$ and $\phi_{\mathrm{CoM}}$ the lean of the pelvis and of the rider's
+**Pose reference.** With $`\phi_{\mathrm{legs}}`$ and $`\phi_{\mathrm{CoM}}`$ the lean of the pelvis and of the rider's
 center of mass from the board, in its roll plane:
 
 $$r_{\mathrm{pose}} = \exp\left(-\left(\frac{\phi_{\mathrm{legs}} - 1.15\,\theta^\ast}{15°}\right)^2\right) \exp\left(-\left(\frac{\phi_{\mathrm{CoM}} - 0.77 \cdot 1.15\,\theta^\ast}{15°}\right)^2\right)$$
 
 **Hand grab.** Heel turn: right hand → toe edge at the front foot. Toe turn: left hand → heel edge at the back foot
 (front and back foot as in the [bindings](BOARD_MODEL.md#3-bindings)). Stage 2 used a Gaussian,
-$e^{-(d/0.6)^2}$ ($d$ in meters), at weight 5.
+$`e^{-(d/0.6)^2}`$ ($`d`$ in meters), at weight 5.
 
 Nothing rewards speed or staying alive: survival pays only through the terms above that it allows. Edge tracking is half of the positive weight; rise, pose reference and hand grab shape the posture that makes a switch possible.
 
@@ -302,13 +302,13 @@ Nothing rewards speed or staying alive: survival pays only through the terms abo
 | Turn, speed and carve rewards, guide S | Every run converged to one deep edge held into the fence | Edge-command tracking |
 | Edge command, alive reward on | Rode straight and flat: being alive paid more than turning | No alive reward; a flat board never pays |
 | Edge command with a side-slip allowance | Slid flat sideways to keep speed and hit the fence | Edge reward requires an edge |
-| $\sigma$ = 12° only | Held the old edge: crossing flat paid nothing, so starting a switch only cost | $\sigma$ = 30° and the edge-side term |
+| $`\sigma`$ = 12° only | Held the old edge: crossing flat paid nothing, so starting a switch only cost | $`\sigma`$ = 30° and the edge-side term |
 | Fall −10 | Switched edges but fell after 2–3 s: a fall cost less than 2 s of edge reward | −50 |
 | Command ±50° at 4–5.5 m/s | 75% of falls were "lying": a 50° edge can't balance below ~7 m/s | Stage 2 at ±15 → 30°; speed and amplitude rise together in stage 3 |
 | Lying = torso > 80° | Legitimate deep toe carves were counted as falls | 95° |
 | Toe → heel never learned | The board could not leave a low toe carve under any forced action: the torso twist sat at its limit | Rider rebuild ([humanoid model §6](HUMANOID_MODEL.md#6-rider-options-carveenvcfg-flags---set)) |
 | Boots added | Edge and lean actions flipped every step, the rider shook | Action smoothing |
-| Grab as a Gaussian, $\sigma$ = 0.25 / 0.6 m | The toe-turn hand sat 0.9 m away with no pull | Linear in distance to 1.2 m |
+| Grab as a Gaussian, $`\sigma`$ = 0.25 / 0.6 m | The toe-turn hand sat 0.9 m away with no pull | Linear in distance to 1.2 m |
 | Edge change on a timer | Turns stopped short of 50° or drifted toward a fence | Heading switch with centering |
 
 ## 5. PPO
@@ -322,34 +322,34 @@ weighted by how well each action turned out.
 | | Supervised (SFT) | PPO |
 |---|---|---|
 | Data | Fixed, labeled | Collected by the current policy, used once, then discarded |
-| "Label" | The correct output $y$ | The action $a$ the policy itself took |
-| Weight | 1 for every example | The advantage $\hat A$: positive if the action beat expectations, negative if not |
-| Loss | $-\mathbb{E}\big[\log p_\theta(y \mid x)\big]$ | $-\mathbb{E}\big[\hat A\,\log\pi_\theta(a \mid s)\big]$ (clipped, see Loss below) |
+| "Label" | The correct output $`y`$ | The action $`a`$ the policy itself took |
+| Weight | 1 for every example | The advantage $`\hat A`$: positive if the action beat expectations, negative if not |
+| Loss | $`-\mathbb{E}\big[\log p_\theta(y \mid x)\big]`$ | $`-\mathbb{E}\big[\hat A\,\log\pi_\theta(a \mid s)\big]`$ (clipped, see Loss below) |
 
 So PPO is a weighted cross-entropy: it raises the probability of actions that worked and lowers the rest. Each
 **iteration** has four steps.
 
-**1. Collect (forward pass only, no learning).** With the current weights $\theta_{\mathrm{old}}$, all 2048 riders act for
-48 steps. Every step is one batched forward pass (input $2048 \times 140$) at 30 Hz, and every rider stores a transition:
+**1. Collect (forward pass only, no learning).** With the current weights $`\theta_{\mathrm{old}}`$, all 2048 riders act for
+48 steps. Every step is one batched forward pass (input $`2048 \times 140`$) at 30 Hz, and every rider stores a transition:
 
 $$a_t \sim \pi_{\theta_{\mathrm{old}}}(\cdot \mid s_t) \qquad (s_{t+1},\ r_t,\ d_t) = \mathrm{env}(s_t, a_t) \qquad \text{stored: } \big(s_t,\ a_t,\ \log\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t),\ r_t,\ d_t,\ V(s_t)\big)$$
 
-The result is a buffer of $48 \times 2048 = 98\,304$ transitions.
+The result is a buffer of $`48 \times 2048 = 98\,304`$ transitions.
 
-**2. Score.** The value network $V$ predicts how much reward to expect from each state. Comparing that prediction with
-what happened gives each transition its advantage $\hat A_t$ and a regression target $\hat R_t$ (GAE, below):
+**2. Score.** The value network $`V`$ predicts how much reward to expect from each state. Comparing that prediction with
+what happened gives each transition its advantage $`\hat A_t`$ and a regression target $`\hat R_t`$ (GAE, below):
 
 $$\hat A_t \approx \underbrace{r_t + \gamma V(s_{t+1})}_{\text{what happened}} - \underbrace{V(s_t)}_{\text{what was expected}}$$
 
 **3. Learn (backprop).** 5 epochs over the buffer, each split into 8 mini-batches of ~12k transitions: 40 gradient
-steps. Each step computes the loss $\mathcal{L}$ (Loss, below) on one mini-batch and updates every trainable number,
-the policy weights, the value weights and $\log\sigma$:
+steps. Each step computes the loss $`\mathcal{L}`$ (Loss, below) on one mini-batch and updates every trainable number,
+the policy weights, the value weights and $`\log\sigma`$:
 
 $$\theta \leftarrow \mathrm{Adam}\big(\theta,\ \nabla_\theta \mathcal{L}\big)$$
 
-**4. Discard and repeat.** The buffer was generated by $\theta_{\mathrm{old}}$ and is no longer typical of the improved
+**4. Discard and repeat.** The buffer was generated by $`\theta_{\mathrm{old}}`$ and is no longer typical of the improved
 policy, so it is thrown away and step 1 runs again with the new weights. A run of 16 000 steps per env is
-$16\,000 / 48 \approx 333$ iterations, about 33 million transitions.
+$`16\,000 / 48 \approx 333`$ iterations, about 33 million transitions.
 
 **Where the forward and backward passes happen:**
 
@@ -364,28 +364,28 @@ restarts and keeps filling its slots.
 
 | Event | What happens | In the advantage |
 |---|---|---|
-| **Fall or fence** | The env resets that rider on the next step | Terminal: $d_t = 1$, so no future reward is counted. The −50 lands here |
-| **Time-out** | Same reset | Not a failure: the future is *estimated* by the value network, $r_t + \gamma V(s_{t+1})$ |
-| **Window ends mid-episode** | The rider keeps going into the next iteration | The value network stands in for the rest of the episode, $\gamma V(s_{t+1})$ |
+| **Fall or fence** | The env resets that rider on the next step | Terminal: $`d_t = 1`$, so no future reward is counted. The −50 lands here |
+| **Time-out** | Same reset | Not a failure: the future is *estimated* by the value network, $`r_t + \gamma V(s_{t+1})`$ |
+| **Window ends mid-episode** | The rider keeps going into the next iteration | The value network stands in for the rest of the episode, $`\gamma V(s_{t+1})`$ |
 
 The sections below give each piece in full: the objective, how the actions are sampled, the advantage, the loss, how σ
 is learned and the hyperparameters.
 
 ### Objective
 
-PPO maximizes the discounted sum of the reward of §4, $J(\pi) = \mathbb{E}\left[\sum_t \gamma^t r_t\right]$. With the
-weights of stage 3 and $e = \theta - \theta^\ast$, each step pays
+PPO maximizes the discounted sum of the reward of §4, $`J(\pi) = \mathbb{E}\left[\sum_t \gamma^t r_t\right]`$. With the
+weights of stage 3 and $`e = \theta - \theta^\ast`$, each step pays
 
 $$r_t = \Delta t\Big[\,30\,g_e + 20\,g_s + 10\,g_p + 30\,g_r - 10\,g_t + 10\,g_h\Big] - 50\ \mathbb{1}[\text{fall or fence}]$$
 
 | | Term | |
 |---|---|---|
-| $g_e$ | Edge command | $e^{-(e/30°)^2}\cdot\mathrm{ramp}(\lvert\theta\rvert;\,10°,\,20°)$ |
-| $g_s$ | Edge side | $\mathrm{sign}(\theta)\,\mathrm{sign}(\theta^\ast)$ when $\lvert\theta^\ast\rvert > 10°$ and $\lvert\theta\rvert > 3°$, else 0 |
-| $g_p$ | Pose reference | the product of two Gaussians in §4, 0 when $\lvert\theta^\ast\rvert < 10°$ |
-| $g_r$ | Rise | $\mathbb{1}[\lvert\theta^\ast\rvert < 8°]\ \mathrm{clip}\big((h_{\mathrm{pelvis}} - 0.35)/0.2,\,0,\,1\big)$ |
-| $g_t$ | Tilt | $\mathrm{clip}\big((\text{torso tilt} - 50°)/20°,\,0,\,1\big)$ |
-| $g_h$ | Hand grab | $\mathrm{clip}(1 - d/1.2\ \mathrm{m},\,0,\,1)$ while on a heel or toe turn, else 0 |
+| $`g_e`$ | Edge command | $`e^{-(e/30°)^2}\cdot\mathrm{ramp}(\lvert\theta\rvert;\,10°,\,20°)`$ |
+| $`g_s`$ | Edge side | $`\mathrm{sign}(\theta)\,\mathrm{sign}(\theta^\ast)`$ when $`\lvert\theta^\ast\rvert > 10°`$ and $`\lvert\theta\rvert > 3°`$, else 0 |
+| $`g_p`$ | Pose reference | the product of two Gaussians in §4, 0 when $`\lvert\theta^\ast\rvert < 10°`$ |
+| $`g_r`$ | Rise | $`\mathbb{1}[\lvert\theta^\ast\rvert < 8°]\ \mathrm{clip}\big((h_{\mathrm{pelvis}} - 0.35)/0.2,\,0,\,1\big)`$ |
+| $`g_t`$ | Tilt | $`\mathrm{clip}\big((\text{torso tilt} - 50°)/20°,\,0,\,1\big)`$ |
+| $`g_h`$ | Hand grab | $`\mathrm{clip}(1 - d/1.2\ \mathrm{m},\,0,\,1)`$ while on a heel or toe turn, else 0 |
 
 ### Sampling
 
@@ -394,36 +394,36 @@ randomness in the data comes from two places:
 
 | Source | What is drawn |
 |---|---|
-| **The policy** | Each step, $a_t \sim \mathcal{N}(\mu_\theta(s_t), \sigma^2)$, drawn by skrl's Gaussian policy model (a `torch.distributions.Normal` over the network's mean and the learned $\log\sigma$). The noise is the exploration; $\log\pi(a_t \mid s_t)$ is stored for the ratio $\rho_t$ |
+| **The policy** | Each step, $`a_t \sim \mathcal{N}(\mu_\theta(s_t), \sigma^2)`$, drawn by skrl's Gaussian policy model (a `torch.distributions.Normal` over the network's mean and the learned $`\log\sigma`$). The noise is the exploration; $`\log\pi(a_t \mid s_t)`$ is stored for the ratio $`\rho_t`$ |
 | **The env, at each reset** | Start speed (4–5.5 m/s) and heading (±20°), start edge side, the command's phase and period (±15%), the first edge side in heading mode, and with probability `rsi_frac` a recorded state (§2) |
 
 Everything between the draws is deterministic physics. The loop for one env:
 
-1. skrl draws $a_t$ from the policy at 30 Hz. The env clips it to $[-1, 1]$, smooths it (EMA 0.35) and turns it into joint targets.
+1. skrl draws $`a_t`$ from the policy at 30 Hz. The env clips it to $`[-1, 1]`$, smooths it (EMA 0.35) and turns it into joint targets.
 2. PhysX holds those targets with PD drives for 4 substeps at 120 Hz; the [snow model](SNOW_MODEL.md) adds glide, steering and grip forces at each substep.
-3. The env returns $s_{t+1}$ and $r_t$ at the end of the 4 substeps.
+3. The env returns $`s_{t+1}`$ and $`r_t`$ at the end of the 4 substeps.
 
 The log-probability is taken on the **raw** Gaussian sample, and the raw sample is what the rollout stores: skrl's
-action clipping is off, so the clamp to $[-1, 1]$ happens in the env and is part of the dynamics PPO sees, not of the
-policy's distribution. Past the clamp, extra noise changes nothing, which is how $\sigma$ grew to ~6 before it was capped.
+action clipping is off, so the clamp to $`[-1, 1]`$ happens in the env and is part of the dynamics PPO sees, not of the
+policy's distribution. Past the clamp, extra noise changes nothing, which is how $`\sigma`$ grew to ~6 before it was capped.
 
 All 2048 riders step together in one batched GPU simulation, so a rollout of 48 steps is 98k transitions from 2048
 different situations. Each rider resets on its own when it falls, crosses a fence or times out, so a batch mixes riders
 at every point of an episode (a fresh start next to a rider mid-switch) and the data is close to independent between
-steps. At evaluation the noise is switched off and the rider takes the mean action $\mu_\theta(s_t)$.
+steps. At evaluation the noise is switched off and the rider takes the mean action $`\mu_\theta(s_t)`$.
 
 ### Advantage (GAE)
 
-Over each 48-step rollout, with the critic $V$, $\gamma = 0.995$ and $\lambda = 0.98$:
+Over each 48-step rollout, with the critic $`V`$, $`\gamma = 0.995`$ and $`\lambda = 0.98`$:
 
 $$\delta_t = r_t + \gamma\,(1 - d_t)\,V(s_{t+1}) - V(s_t) \qquad \hat A_t = \sum_{l \ge 0} (\gamma\lambda)^l\,\delta_{t+l} \qquad \hat R_t = \hat A_t + V(s_t)$$
 
-$d_t = 1$ after a fall or a fence, and 0 otherwise: a time-out is bootstrapped through $V(s_{t+1})$. Advantages are
+$`d_t = 1`$ after a fall or a fence, and 0 otherwise: a time-out is bootstrapped through $`V(s_{t+1})`$. Advantages are
 normalized over the batch.
 
 ### Loss
 
-With the probability ratio $\rho_t = \pi_\theta(a_t \mid s_t)\,/\,\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t)$:
+With the probability ratio $`\rho_t = \pi_\theta(a_t \mid s_t)\,/\,\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t)`$:
 
 $$\mathcal{L}_{\mathrm{clip}} = \mathbb{E}\Big[\min\big(\rho_t \hat A_t,\ \mathrm{clip}(\rho_t,\,1-\epsilon,\,1+\epsilon)\,\hat A_t\big)\Big] \qquad \epsilon = 0.2$$
 
@@ -431,40 +431,40 @@ $$\mathcal{L}_V = c_v\ \mathbb{E}\Big[\big(\hat R_t - V_{\mathrm{clip}}(s_t)\big
 
 $$H(\pi) = \sum_{i=1}^{30} \left(\log\sigma_i + \tfrac12\log 2\pi e\right) \qquad \mathcal{L} = -\mathcal{L}_{\mathrm{clip}} + \mathcal{L}_V - c_H\,H(\pi) \qquad c_H = 0.003$$
 
-The policy is a diagonal Gaussian over the 30 actions, $a \sim \mathcal{N}\big(\mu_\theta(s),\ \mathrm{diag}\,\sigma^2\big)$.
+The policy is a diagonal Gaussian over the 30 actions, $`a \sim \mathcal{N}\big(\mu_\theta(s),\ \mathrm{diag}\,\sigma^2\big)`$.
 Observations and value targets pass through a running mean and standard deviation. The gradient norm is clipped at 1.0.
 
 ### How the exploration noise σ is learned
 
 The two parts of the Gaussian are learned differently:
 
-| | Mean $\mu_\theta(s)$ | Std $\sigma$ |
+| | Mean $`\mu_\theta(s)`$ | Std $`\sigma`$ |
 |---|---|---|
-| What it is | The MLP: 140 → 512 → 256 → 128 → 30 | One vector of 30 trainable numbers, $\log\sigma$ |
-| Depends on the observation? | Yes: a different $\mu$ per state | No: the same 30 values in every state |
+| What it is | The MLP: 140 → 512 → 256 → 128 → 30 | One vector of 30 trainable numbers, $`\log\sigma`$ |
+| Depends on the observation? | Yes: a different $`\mu`$ per state | No: the same 30 values in every state |
 | How it changes | Gradient descent on the weights | Gradient descent directly on the 30 numbers |
 
 So σ is not a network: it is "how much to wiggle each action" (one number per action), while the MLP decides "which way
-to push each action". It starts at $\log\sigma = -1$ ($\sigma \approx 0.37$) and is capped at $-0.3$ ($\sigma \le 0.74$).
+to push each action". It starts at $`\log\sigma = -1`$ ($`\sigma \approx 0.37`$) and is capped at $`-0.3`$ ($`\sigma \le 0.74`$).
 
-The gradient that moves it comes from the log-probability of a sampled action. With $z_i = (a_i - \mu_i)/\sigma_i$, the
+The gradient that moves it comes from the log-probability of a sampled action. With $`z_i = (a_i - \mu_i)/\sigma_i`$, the
 number of σ the sample landed from the mean,
 
 $$\frac{\partial \log\pi(a)}{\partial \log\sigma_i} = z_i^2 - 1$$
 
-and the policy-gradient term is about $\hat A_t\,(z_i^2 - 1)$:
+and the policy-gradient term is about $`\hat A_t\,(z_i^2 - 1)`$:
 
-| Sample | Advantage | Effect on $\sigma_i$ |
+| Sample | Advantage | Effect on $`\sigma_i`$ |
 |---|---|---|
-| Far from the mean ($\lvert z\rvert > 1$) | positive | **grows**: wider noise found something good |
+| Far from the mean ($`\lvert z\rvert > 1`$) | positive | **grows**: wider noise found something good |
 | Far from the mean | negative | **shrinks**: the wide excursion hurt |
-| Near the mean ($\lvert z\rvert < 1$) | positive | **shrinks**: staying close paid off |
+| Near the mean ($`\lvert z\rvert < 1`$) | positive | **shrinks**: staying close paid off |
 | Near the mean | negative | grows |
 
-Averaged over the 98k samples of an update, $\sigma_i$ grows if big deviations tend to beat the average and shrinks if
-they tend to lose. The entropy bonus adds a constant push upward ($\partial H / \partial\log\sigma_i = 1$, times
+Averaged over the 98k samples of an update, $`\sigma_i`$ grows if big deviations tend to beat the average and shrinks if
+they tend to lose. The entropy bonus adds a constant push upward ($`\partial H / \partial\log\sigma_i = 1`$, times
 0.003) so σ does not collapse early. Adam steps
-$\log\sigma$ together with the network weights, and samples whose ratio is already outside the clip range add no
+$`\log\sigma`$ together with the network weights, and samples whose ratio is already outside the clip range add no
 gradient.
 
 ### One update
@@ -483,9 +483,9 @@ policy sets Adam's learning rate: it is divided by 1.5 when the KL goes above tw
 | Update | 5 epochs × 8 mini-batches |
 | Training | 16 000 steps per env per run (~26 min on one GPU) |
 | Networks | Policy and value: separate MLPs, 512-256-128, ELU |
-| Policy | Gaussian, initial std $e^{-1}$, capped at $e^{-0.3}$ (it had grown to ~6 against clipped actions) |
-| Discount, GAE | $\gamma$ = 0.995 (~6.7 s, more than one S), $\lambda$ = 0.98 |
-| Learning rate | $10^{-3}$, KL-adaptive (target KL 0.01) |
+| Policy | Gaussian, initial std $`e^{-1}`$, capped at $`e^{-0.3}`$ (it had grown to ~6 against clipped actions) |
+| Discount, GAE | $`\gamma`$ = 0.995 (~6.7 s, more than one S), $`\lambda`$ = 0.98 |
+| Learning rate | $`10^{-3}`$, KL-adaptive (target KL 0.01) |
 | Clipping | Ratio 0.2, value 0.2, grad norm 1.0 |
 | Entropy bonus | 0.003 |
 | Warm start | Each stage starts from the previous stage's weights; the exploration noise is reset |
@@ -526,7 +526,7 @@ briefly through each edge change.
 
 ### Stage 4: tighter turns (`saved/04_stage3_tighter`)
 
-The overshoot is the heading switch firing late: the edge command only flips once $\psi$ passes the switch heading,
+The overshoot is the heading switch firing late: the edge command only flips once $`\psi`$ passes the switch heading,
 and the board keeps swinging while the command ramps through flat. Switching earlier ends the turn nearer the target.
 Stage 4 does this, warm-started from stage 3:
 
@@ -548,6 +548,6 @@ GIFs: `docs/demo/04_stage3_tighter_front.gif`, `_top.gif`.
 
 | Gap | Effect |
 |---|---|
-| Turn sharpness | Going below a 40° switch heading should add turns until the sidecut sets the limit ($R_{sc}\cos\theta$, see the [snow model §5](SNOW_MODEL.md#5-in-the-trained-carve)) |
+| Turn sharpness | Going below a 40° switch heading should add turns until the sidecut sets the limit ($`R_{sc}\cos\theta`$, see the [snow model §5](SNOW_MODEL.md#5-in-the-trained-carve)) |
 | Sharper turns at the same edge angle | Need the two-half board's progressive sidecut and flex ([board model §4](BOARD_MODEL.md#4-two-half-board-opt-in-not-used-in-the-demo)), not trained on |
 | Skid through edge changes | Small smudges remain at each change |
