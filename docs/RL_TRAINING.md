@@ -238,8 +238,8 @@ toe peak. Without them every episode started tall, the only pose the policy had 
 |  |  | Ankles | 6 | $`a^{\mathrm{ankle}}`$ | 3 per foot; ±15%, clipped to the boots' range |
 |  |  | Shoulders | 6 | $`a^{\mathrm{sh}}`$ | 3 per arm; **±50%** (the arms reach for the hand grab) |
 |  |  | Elbows | 2 | $`a^{\mathrm{elb}}`$ | **±50%** |
-|  | Processing | Sample | 30 | $`a \sim \mathcal{N}(\mu, \sigma^2)`$ | Raw Gaussian sample, 30 Hz; clipped to $`[-1, 1]`$ |
-|  |  | Smoothing | 30 | $`\tilde a_t = 0.65\,\tilde a_{t-1} + 0.35\,a_t`$ | EMA, ~0.1 s, stops chatter |
+|  | Processing | Sample | 30 | $`a \sim \mathcal{N}(\mu, \sigma^2)`$ | Raw Gaussian sample, continuous (not binned); clipped to $`[-1, 1]`$ |
+|  |  | Smoothing | 30 | $`\tilde a_t = 0.65\,\tilde a_{t-1} + 0.35\,a_t`$ | EMA on the new action, stops chatter |
 |  |  | Joint target | 28 | $`q^\ast`$ | Stance + scaled residual + synergy terms, clipped to the joint limits; held by the PD drives ([humanoid model §5](HUMANOID_MODEL.md#5-actions--joint-targets)) |
 | **Fall** |  | Torso tilt |  | $`\phi_{\mathrm{torso}} > 95^\circ`$ | `lying_deg`; a toe carve bows the torso 55–70° |
 |  |  | Pelvis above the board |  | $`h_{\mathrm{pelvis,board}} < 0.12`$ m | Sitting on the board |
@@ -251,18 +251,15 @@ toe peak. Without them every episode started tall, the only pose the policy had 
 
 ### From observation to joint targets
 
-**Observation:** 140 numbers, all normalized by a running mean/std (table above).
+The 140 observations pass through a running mean/std. The network emits 30 means $\mu$; the standard deviations are not
+an output but 30 learned $\log\sigma$ parameters shared by all states. Each step $a \sim \mathcal{N}(\mu, \sigma^2)$,
+and the table above shows how the sample becomes a joint target.
 
-**Policy output (30 numbers):** the network emits 30 means $\mu$. The standard deviations are not an output: they are
-30 learned $\log\sigma$ parameters shared by all states. Each step $a \sim \mathcal{N}(\mu, \sigma^2)$.
-
-**To joint targets:** the sample is clipped to $[-1, 1]$ and smoothed (EMA, 0.35 on the new value). Each joint target
-is the squat stance plus its scaled residual plus the synergy contributions, clipped to the joint limits (formula and
-scales in [humanoid model §5](HUMANOID_MODEL.md#5-actions--joint-targets)). The PD drives then hold the targets for
-4 substeps at 120 Hz.
-
-The rider rides the rigid board ([board model §1](BOARD_MODEL.md#1-geometry)); the two-half board
-([§4](BOARD_MODEL.md#4-two-half-board-opt-in-not-used-in-the-demo)) is never trained on.
+| Granularity | |
+|---|---|
+| **Policy rate** | **30 Hz**: one 30-number action every 1/30 s (33 ms) |
+| **Simulation rate** | **120 Hz**: PhysX runs 4 substeps per policy step with the target held fixed; the PD drives recompute torque at each one |
+| **Smoothing** | The EMA spreads a change over ~0.1 s (~3 policy steps). An edge switch of 0.8–1.1 s takes 24–33 policy steps |
 
 ## 4. Reward
 
