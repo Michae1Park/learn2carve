@@ -69,7 +69,9 @@ hold it, and change it without falling, in a posture it can switch from (the pos
 
 The sidecut radius is $`R_{sc}`$ = 7.6 m ([board model §1](BOARD_MODEL.md#1-geometry)). The balanced edge is
 
-$$\sin\theta = \frac{v^2}{g\cos\alpha \cdot R_{sc}}$$
+```math
+\sin\theta = \frac{v^2}{g\cos\alpha \cdot R_{sc}}
+```
 
 which is 20° at 5 m/s and 41° at 7 m/s on a 9° slope. A 40°+ edge only balances above ~7 m/s, so edge angle and speed
 have to rise together.
@@ -93,7 +95,9 @@ ahead (§3).
 
 The timed command, with amplitude $`A`$ and random phase $`\varphi`$:
 
-$$\theta^\ast(t) = A \cdot \mathrm{clip}\left(1.8\,\sin\left(\frac{2\pi t}{T} + \varphi\right),\ -1,\ 1\right)$$
+```math
+\theta^\ast(t) = A \cdot \mathrm{clip}\left(1.8\,\sin\left(\frac{2\pi t}{T} + \varphi\right),\ -1,\ 1\right)
+```
 
 **Curriculum.** The amplitude $`A`$ and period $`T`$ step from easy to hard by a level in $`[0, 1]`$. It rises while the
 running edge error is below 12° and falls above 24°. The policy sees the command now, +0.3 s and +0.6 s.
@@ -161,7 +165,9 @@ turns that actually completed.
 **The command is a small state machine.** The env holds one edge at $`\pm A`$ until the travel direction $`\psi`$ has swung
 past a switch heading, then ramps from wherever the command is to the other edge over 0.6 s:
 
-$$\theta^\ast = \theta_{\mathrm{from}} + (\pm A - \theta_{\mathrm{from}})\ \mathrm{clip}\left(\frac{t_{\mathrm{since\ switch}}}{0.6\ \mathrm{s}},\ 0,\ 1\right)$$
+```math
+\theta^\ast = \theta_{\mathrm{from}} + (\pm A - \theta_{\mathrm{from}})\ \mathrm{clip}\left(\frac{t_{\mathrm{since\ switch}}}{0.6\ \mathrm{s}},\ 0,\ 1\right)
+```
 
 The switch is allowed after 1 s on an edge and forced after 4 s. The reward is unchanged: it still pays
 $`e^{-(e/30°)^2}`$ on $`e = \theta - \theta^\ast`$, but now *when* $`\theta^\ast`$ flips depends on the board's own turn.
@@ -254,7 +260,9 @@ The smoothed action has 30 components: 28 joint residuals
 $`\tilde a_j`$ and 2 synergies $`\tilde s_0, \tilde s_1`$. Each joint's target is its stance angle, plus a scaled
 residual, plus the synergy terms, clipped to the joint limits:
 
-$$q^\ast_j = \mathrm{clip}\Big(q^{\mathrm{stance}}_j \;+\; \underbrace{c_j\,\tfrac12\big(q^{\max}_j - q^{\min}_j\big)\,\tilde a_j}_{\text{joint residual}} \;+\; \underbrace{\tilde s_0\,\rho^{\mathrm{edge}}_j + \tilde s_1\,\rho^{\mathrm{lean}}_j}_{\text{synergies}} \;+\; \underbrace{[\tilde s_0]_+\,\rho^{\mathrm{toe}}_j}_{\text{toe extra}},\ \ q^{\min}_j,\ q^{\max}_j\Big)$$
+```math
+q^\ast_j = \mathrm{clip}\Big(q^{\mathrm{stance}}_j \;+\; \underbrace{c_j\,\tfrac12\big(q^{\max}_j - q^{\min}_j\big)\,\tilde a_j}_{\text{joint residual}} \;+\; \underbrace{\tilde s_0\,\rho^{\mathrm{edge}}_j + \tilde s_1\,\rho^{\mathrm{lean}}_j}_{\text{synergies}} \;+\; \underbrace{[\tilde s_0]_+\,\rho^{\mathrm{toe}}_j}_{\text{toe extra}},\ \ q^{\min}_j,\ q^{\max}_j\Big)
+```
 
 | Term | Meaning |
 |---|---|
@@ -297,7 +305,9 @@ How each ending enters the return (the −50 on a fall or fence, the bootstrap t
 
 Each step, with $`\Delta t = 1/30`$ s and the edge error $`e = \theta - \theta^\ast`$:
 
-$$r = \Delta t \sum_i w_i r_i + w_{\mathrm{fall}}\ \mathbb{1}[\text{fall or fence}]$$
+```math
+r = \Delta t \sum_i w_i r_i + w_{\mathrm{fall}}\ \mathbb{1}[\text{fall or fence}]
+```
 
 Weights $`w_i`$ are those of stage 3.
 
@@ -314,7 +324,9 @@ Weights $`w_i`$ are those of stage 3.
 **Pose reference.** With $`\phi_{\mathrm{legs}}`$ and $`\phi_{\mathrm{CoM}}`$ the lean of the pelvis and of the rider's
 center of mass from the board, in its roll plane:
 
-$$r_{\mathrm{pose}} = \exp\left(-\left(\frac{\phi_{\mathrm{legs}} - 1.15\,\theta^\ast}{15°}\right)^2\right) \exp\left(-\left(\frac{\phi_{\mathrm{CoM}} - 0.77 \cdot 1.15\,\theta^\ast}{15°}\right)^2\right)$$
+```math
+r_{\mathrm{pose}} = \exp\left(-\left(\frac{\phi_{\mathrm{legs}} - 1.15\,\theta^\ast}{15°}\right)^2\right) \exp\left(-\left(\frac{\phi_{\mathrm{CoM}} - 0.77 \cdot 1.15\,\theta^\ast}{15°}\right)^2\right)
+```
 
 **Hand grab.** Heel turn: right hand → toe edge at the front foot. Toe turn: left hand → heel edge at the back foot
 (front and back foot as in the [bindings](BOARD_MODEL.md#3-bindings)). Stage 2 used a Gaussian,
@@ -359,14 +371,18 @@ So PPO is a weighted cross-entropy: it raises the probability of actions that wo
 **1. Collect (forward pass only, no learning).** With the current weights $`\theta_{\mathrm{old}}`$, all 2048 riders act for
 48 steps. Every step is one batched forward pass (input $`2048 \times 140`$) at 30 Hz, and every rider stores a transition:
 
-$$a_t \sim \pi_{\theta_{\mathrm{old}}}(\cdot \mid s_t) \qquad (s_{t+1},\ r_t,\ d_t) = \mathrm{env}(s_t, a_t) \qquad \text{stored: } \big(s_t,\ a_t,\ \log\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t),\ r_t,\ d_t,\ V(s_t)\big)$$
+```math
+a_t \sim \pi_{\theta_{\mathrm{old}}}(\cdot \mid s_t) \qquad (s_{t+1},\ r_t,\ d_t) = \mathrm{env}(s_t, a_t) \qquad \text{stored: } \big(s_t,\ a_t,\ \log\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t),\ r_t,\ d_t,\ V(s_t)\big)
+```
 
 The result is a buffer of $`48 \times 2048 = 98\,304`$ transitions.
 
 **2. Score.** The value network $`V`$ predicts how much reward to expect from each state. Comparing that prediction with
 what happened gives each transition its advantage $`\hat A_t`$ and a regression target $`\hat R_t`$ (GAE, below):
 
-$$\hat A_t \approx \underbrace{r_t + \gamma V(s_{t+1})}_{\text{what happened}} - \underbrace{V(s_t)}_{\text{what was expected}}$$
+```math
+\hat A_t \approx \underbrace{r_t + \gamma V(s_{t+1})}_{\text{what happened}} - \underbrace{V(s_t)}_{\text{what was expected}}
+```
 
 **3. Learn (backprop).** The 98k transitions are pooled and shuffled, so rider and time order are gone, then split
 into 8 mini-batches of ~12k. A mini-batch is a random slice of transitions, not 8 riders. One pass over all 8 is an
@@ -374,7 +390,9 @@ into 8 mini-batches of ~12k. A mini-batch is a random slice of transitions, not 
 computes the loss $`\mathcal{L}`$ (Loss, below) on one mini-batch and updates every trainable number, the policy
 weights, the value weights and $`\log\sigma`$:
 
-$$\theta \leftarrow \mathrm{Adam}\big(\theta,\ \nabla_\theta \mathcal{L}\big)$$
+```math
+\theta \leftarrow \mathrm{Adam}\big(\theta,\ \nabla_\theta \mathcal{L}\big)
+```
 
 The advantages of step 2 are computed once, on the time-ordered buffer, before the first epoch and not recomputed per
 epoch. That is why shuffling is safe: each transition already carries its $`\hat A_t`$ and $`\hat R_t`$. The 40 steps
@@ -409,7 +427,9 @@ is learned and the hyperparameters.
 PPO maximizes the discounted sum of the reward of §4, $`J(\pi) = \mathbb{E}\left[\sum_t \gamma^t r_t\right]`$. With the
 weights of stage 3 and $`e = \theta - \theta^\ast`$, each step pays
 
-$$r_t = \Delta t\Big[\,30\,g_e + 20\,g_s + 10\,g_p + 30\,g_r - 10\,g_t + 10\,g_h\Big] - 50\ \mathbb{1}[\text{fall or fence}]$$
+```math
+r_t = \Delta t\Big[\,30\,g_e + 20\,g_s + 10\,g_p + 30\,g_r - 10\,g_t + 10\,g_h\Big] - 50\ \mathbb{1}[\text{fall or fence}]
+```
 
 | | Term | |
 |---|---|---|
@@ -449,7 +469,9 @@ steps. At evaluation the noise is switched off and the rider takes the mean acti
 
 Over each 48-step rollout, with the critic $`V`$, $`\gamma = 0.995`$ and $`\lambda = 0.98`$:
 
-$$\delta_t = r_t + \gamma\,(1 - d_t)\,V(s_{t+1}) - V(s_t) \qquad \hat A_t = \sum_{l \ge 0} (\gamma\lambda)^l\,\delta_{t+l} \qquad \hat R_t = \hat A_t + V(s_t)$$
+```math
+\delta_t = r_t + \gamma\,(1 - d_t)\,V(s_{t+1}) - V(s_t) \qquad \hat A_t = \sum_{l \ge 0} (\gamma\lambda)^l\,\delta_{t+l} \qquad \hat R_t = \hat A_t + V(s_t)
+```
 
 $`d_t = 1`$ after a fall or a fence, and 0 otherwise: a time-out is bootstrapped through $`V(s_{t+1})`$. Advantages are
 normalized over the batch.
@@ -458,11 +480,17 @@ normalized over the batch.
 
 With the probability ratio $`\rho_t = \pi_\theta(a_t \mid s_t)\,/\,\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t)`$:
 
-$$\mathcal{L}_{\mathrm{clip}} = \mathbb{E}\Big[\min\big(\rho_t \hat A_t,\ \mathrm{clip}(\rho_t,\,1-\epsilon,\,1+\epsilon)\,\hat A_t\big)\Big] \qquad \epsilon = 0.2$$
+```math
+\mathcal{L}_{\mathrm{clip}} = \mathbb{E}\Big[\min\big(\rho_t \hat A_t,\ \mathrm{clip}(\rho_t,\,1-\epsilon,\,1+\epsilon)\,\hat A_t\big)\Big] \qquad \epsilon = 0.2
+```
 
-$$\mathcal{L}_V = c_v\ \mathbb{E}\Big[\big(\hat R_t - V_{\mathrm{clip}}(s_t)\big)^2\Big] \qquad V_{\mathrm{clip}} = V_{\mathrm{old}} + \mathrm{clip}\big(V - V_{\mathrm{old}},\ \pm 0.2\big) \qquad c_v = 1$$
+```math
+\mathcal{L}_V = c_v\ \mathbb{E}\Big[\big(\hat R_t - V_{\mathrm{clip}}(s_t)\big)^2\Big] \qquad V_{\mathrm{clip}} = V_{\mathrm{old}} + \mathrm{clip}\big(V - V_{\mathrm{old}},\ \pm 0.2\big) \qquad c_v = 1
+```
 
-$$H(\pi) = \sum_{i=1}^{30} \left(\log\sigma_i + \tfrac12\log 2\pi e\right) \qquad \mathcal{L} = -\mathcal{L}_{\mathrm{clip}} + \mathcal{L}_V - c_H\,H(\pi) \qquad c_H = 0.003$$
+```math
+H(\pi) = \sum_{i=1}^{30} \left(\log\sigma_i + \tfrac12\log 2\pi e\right) \qquad \mathcal{L} = -\mathcal{L}_{\mathrm{clip}} + \mathcal{L}_V - c_H\,H(\pi) \qquad c_H = 0.003
+```
 
 The policy is a diagonal Gaussian over the 30 actions, $`a \sim \mathcal{N}\big(\mu_\theta(s),\ \mathrm{diag}\,\sigma^2\big)`$.
 Observations and value targets pass through a running mean and standard deviation. The gradient norm is clipped at 1.0.
@@ -483,7 +511,9 @@ to push each action". It starts at $`\log\sigma = -1`$ ($`\sigma \approx 0.37`$)
 The gradient that moves it comes from the log-probability of a sampled action. With $`z_i = (a_i - \mu_i)/\sigma_i`$, the
 number of σ the sample landed from the mean,
 
-$$\frac{\partial \log\pi(a)}{\partial \log\sigma_i} = z_i^2 - 1$$
+```math
+\frac{\partial \log\pi(a)}{\partial \log\sigma_i} = z_i^2 - 1
+```
 
 and the policy-gradient term is about $`\hat A_t\,(z_i^2 - 1)`$:
 

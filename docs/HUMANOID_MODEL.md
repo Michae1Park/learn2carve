@@ -26,16 +26,20 @@ The stock humanoid is ~36 kg and 1.612 m. The demo scales its size ×1.024 to 1.
 offsets, joint anchors and shapes), then its masses, inertias and joint gains by one mass factor, so the dynamics keep
 their shape at the new weight:
 
-$$k = \frac{m_{\text{rider}}}{\sum_i m_i} = \frac{65}{35.7} = 1.82 \qquad m_i \leftarrow k\,m_i,\quad I_i \leftarrow k\,I_i,\quad (K_p, K_d) \leftarrow k\,(K_p, K_d)$$
+```math
+k = \frac{m_{\text{rider}}}{\sum_i m_i} = \frac{65}{35.7} = 1.82 \qquad m_i \leftarrow k\,m_i,\quad I_i \leftarrow k\,I_i,\quad (K_p, K_d) \leftarrow k\,(K_p, K_d)
+```
 
 ## 2. Joints and drives
 
-Spherical joints are three revolute axes ($x, y, z$); knees and elbows are hinges. Every joint is a stiff PD
+Spherical joints are three revolute axes ($`x, y, z`$); knees and elbows are hinges. Every joint is a stiff PD
 position drive (implicit in PhysX):
 
-$$\tau_j = K_p\,(q_j^* - q_j) - K_d\,\dot q_j$$
+```math
+\tau_j = K_p\,(q_j^* - q_j) - K_d\,\dot q_j
+```
 
-| Joint | DoF | Range (x / y / z) | $K_p$ | $K_d$ |
+| Joint | DoF | Range (x / y / z) | $`K_p`$ | $`K_d`$ |
 |---|---|---|---|---|
 | Abdomen | 3 | ±60 / −60…90 / ±50 (±90 in the demo) | 62 537 | 6 254 |
 | Neck | 3 | ±50 / −40…60 / ±45 | 5 211 | 521 |
@@ -67,7 +71,7 @@ The loop needs a converged solver: **32 position / 4 velocity iterations** at 12
 
 ## 4. Stance (`scripts/make_stance.py`)
 
-The default pose $q^{\text{stance}}$ is *found by simulation*, not hand-set: the pelvis and board are welded to the
+The default pose $`q^{\text{stance}}`$ is *found by simulation*, not hand-set: the pelvis and board are welded to the
 world at the target poses, the binding constraints pull the feet onto the board, and the drives settle. The result
 closes both loops exactly and is saved to `envs/assets/stances/stance_<front>_<back>[_<tag>].yaml`.
 
@@ -88,17 +92,19 @@ Stance files are named by binding angles, `stance_<front>_<back>[_<tag>].yaml`.
 The demo policy has **30 actions**: 2 synergy actions + 28 joint residuals (26 joints + 2 knee flexions; the knee
 twist and the boots' stance are left to their drives). Targets add up as
 
-$$q^* = \mathrm{clip}\!\left(q^{\text{stance}} + 0.3 \cdot 0.25 \cdot \tfrac{1}{2}(q^{\max} - q^{\min}) \cdot a_j + \textstyle\sum_k s_k\,\rho_k + \text{toe}(s_0),\ q^{\min},\ q^{\max}\right)$$
+```math
+q^* = \mathrm{clip}\!\left(q^{\text{stance}} + 0.3 \cdot 0.25 \cdot \tfrac{1}{2}(q^{\max} - q^{\min}) \cdot a_j + \textstyle\sum_k s_k\,\rho_k + \text{toe}(s_0),\ q^{\min},\ q^{\max}\right)
+```
 
 | Term | Value |
 |---|---|
-| Joint residual $a_j \in [-1, 1]$ | $\pm7.5\%$ of each joint's half-range (action scale 0.25 × synergy residual 0.3); **arms ±50%** (`arm_action_scale=0.5`, no residual factor) |
-| Edge synergy $s_0$ | Both ankle flex +0.5 rad and both knees +0.6 rad per unit: one number rolls the board onto its edge (+1 toe). With boots the ankle part is clipped to the boots' −5…+15°, so the knees do most of it |
-| Lean synergy $s_1$ | Abdomen side-bend 0.9 rad per unit (counter-angulation) |
-| Toe extra | For $s_0 > 0$ also knees +0.4 rad and hips pitch −0.3 rad per unit: the toe edge comes from a squat |
+| Joint residual $`a_j \in [-1, 1]`$ | $`\pm7.5\%`$ of each joint's half-range (action scale 0.25 × synergy residual 0.3); **arms ±50%** (`arm_action_scale=0.5`, no residual factor) |
+| Edge synergy $`s_0`$ | Both ankle flex +0.5 rad and both knees +0.6 rad per unit: one number rolls the board onto its edge (+1 toe). With boots the ankle part is clipped to the boots' −5…+15°, so the knees do most of it |
+| Lean synergy $`s_1`$ | Abdomen side-bend 0.9 rad per unit (counter-angulation) |
+| Toe extra | For $`s_0 > 0`$ also knees +0.4 rad and hips pitch −0.3 rad per unit: the toe edge comes from a squat |
 | Smoothing | Both the synergy and joint actions go through an EMA, weight 0.35 on the new value (~0.1 s at 30 Hz), to stop chatter |
 
-Without synergy (baseline) the 28 joint actions move $\pm 50\%$ of the half-range directly.
+Without synergy (baseline) the 28 joint actions move $`\pm 50\%`$ of the half-range directly.
 
 ## 6. Rider options (`CarveEnvCfg` flags, `--set`)
 
