@@ -7,16 +7,19 @@ motion data. SI units; angles in ° unless marked rad.
 
 ![Training loop: policy at 30 Hz, PD joints, snow model and PhysX at 120 Hz, rewards, PPO update every 48 steps](rider/training_loop.svg)
 
-| Settings | Where | Override |
-|---|---|---|
+**Settings** (all SI units, angles in °):
+
 | File | Holds |
 |---|---|
 | `envs/physical.yaml` | Physical facts: rider size, stance, board, snow, piste width (stance pose: `envs/assets/stances/`) |
-| **`playground/snowboard/env.yaml`** | **Every training knob with its default and a comment:** hill, starts, falls, edge command, curriculum, recorded-state starts, rider options, actions, reward. The defaults are the stage 3 setup |
-| `playground/snowboard/stages/stage2.yaml`, `stage3.yaml`, `stage4.yaml` | Only what each stage changes from `env.yaml` |
-| `playground/snowboard/ppo.yaml` | PPO |
+| **`playground/snowboard/env.yaml`** | **Every training knob, with its default and a comment:** hill, starts, falls, edge command, curriculum, recorded-state starts, rider options, actions, reward. The defaults are the stage 3 setup |
+| `playground/snowboard/stages/stage{2,3,4}.yaml` | Only what each stage changes from `env.yaml` |
+| `playground/snowboard/ppo.yaml` | PPO and the networks |
 
-Train a stage with `train.py --stage stage2`; `--set key=value` changes an `env.yaml` key for one run.
+```bash
+scripts/py playground/snowboard/train.py --stage stage2                      # train a stage
+scripts/py playground/snowboard/train.py --stage stage2 --set slope_deg=8   # change one env.yaml key for this run
+```
 
 **A run folder is self-contained.** Training writes everything needed to rebuild the policy's world next to its
 checkpoints, and `play.py` and the diagnostics read those copies, not the repo's current files:
@@ -166,7 +169,7 @@ Nothing rewards speed, staying alive, posture or style: survival pays only throu
 | Envs | 2048 in parallel |
 | Rollout | 48 steps (1.6 s, an edge change fits) × 2048 = **98k samples per update** |
 | Update | 5 epochs × 8 mini-batches |
-| Training | 16 000 steps per env per run (~26 min on one GPU) |
+| Training | `timesteps` in `ppo.yaml` (12 000 per env = 250 updates; `--timesteps` overrides). The saved runs used 16 000 (~26 min on one GPU) |
 | Networks | Policy and value: separate MLPs, 512-256-128, ELU |
 | Policy | Gaussian, initial std $e^{-1}$, capped at $e^{-0.3}$ (it had grown to ~6 against clipped actions) |
 | Discount, GAE | $\gamma$ = 0.995 (~6.7 s, more than one S), $\lambda$ = 0.98 |
