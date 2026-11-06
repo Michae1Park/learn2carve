@@ -1,0 +1,23 @@
+# Stage 2 for the G1 from scratch on 70/65 bindings, 0.42 m stance. stance_70_65_g1: hips 0.10 m toward the tail,
+# pelvis hinged 50° forward (abdomen down toward the front thigh), 0.60 m hip height. Stock drives. Use with --set robot=g1.
+
+env:
+  slope_deg: 7
+  episode_length_s: 10
+  carve_start: true
+  edge_cmd_mode: timer
+  edge_cmd_amp_deg: [15, 30]
+  edge_cmd_period_s: [6.0, 4.0]
+  edge_cmd_max_s: 3.0
+  edge_cmd_center_deg_per_m: 0
+  rsi_frac: 0.5
+  binding_angles_deg: [70, 65]
+  stance_width: 0.42
+  g1_gains: isaac
+  arm_action_scale: 0.5
+  free_action_scale: {}
+  synergy_edge_rad: {left_knee_joint: 0.5, right_knee_joint: 0.5, left_ankle_pitch_joint: -0.3, right_ankle_pitch_joint: -0.3}
+
+rewards:
+  grab: 5
+  grab_linear_m: 0
