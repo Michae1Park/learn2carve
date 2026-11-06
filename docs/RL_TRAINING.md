@@ -18,7 +18,8 @@ follows what failed when it was tried all at once.
 | **3. Full S** | Link the flips into an S, with the edge change triggered by the turn itself, and stay between the fences | Stage 2's fixed clock ignores where the board is, so the rider drifts into a fence. Here the turn itself decides when to flip |
 | **4. Tighter turns** | End each turn sooner, without the overshoot | Stage 3's turns swing past their target |
 
-Details and results per stage: [§5](#5-stages).
+Details and results per stage: [§5](#5-stages). Within a stage the edge command also gets harder automatically, as long as
+the rider keeps up (a curriculum, §5).
 
 ### What a good carve looks like
 
@@ -529,8 +530,46 @@ and the **heading** command ramps from its value $`\theta_{\mathrm{from}}`$ at t
 \theta^\ast = \theta_{\mathrm{from}} + (\pm A - \theta_{\mathrm{from}})\ \mathrm{clip}\left(\frac{t_{\mathrm{since\ switch}}}{0.6\ \mathrm{s}},\ 0,\ 1\right)
 ```
 
-**Curriculum.** $`A`$ and $`T`$ step from easy to hard by a level in $`[0, 1]`$. The level rises while the running edge error
-is below 12° and falls above 24°.
+### Curriculum: how the difficulty adapts
+
+Training uses two curricula:
+
+- **Across stages**, by hand: a fixed sequence of tasks (hold → switch → S → tighter), each warm-started from the last.
+- **Within a stage**, automatically: the edge command starts easy and gets harder only while the rider keeps up. This
+  section is about that one.
+
+A single **difficulty level** $`\ell \in [0, 1]`$ sets how hard the command is. It scales the amplitude and, for the timed
+command, the period between their easy and hard values:
+
+```math
+A(\ell) = A_{\mathrm{easy}} + \ell\,(A_{\mathrm{hard}} - A_{\mathrm{easy}}) \qquad T(\ell) = T_{\mathrm{easy}} + \ell\,(T_{\mathrm{hard}} - T_{\mathrm{easy}})
+```
+
+| Stage | Amplitude $`A`$ (level 0 → 1) | Period $`T`$ (level 0 → 1) |
+|---|---|---|
+| 2 | 15° → 30° | 6 s → 4 s |
+| 3–4 | 25° → 45° | not used: the heading command has no period |
+
+The level moves according to how well the rider is tracking:
+
+| Part | In this project |
+|---|---|
+| **Competence measure** | A running average of the edge error over the riders still upright, $`\bar e \leftarrow 0.99\,\bar e + 0.01\,\mathrm{mean}\lvert\theta - \theta^\ast\rvert`$. It starts at 90°, so the level stays at 0 until the rider is tracking |
+| **Competence threshold** | The level rises while $`\bar e < 12°`$ and falls while $`\bar e > 24°`$ (twice 12°). In between it holds, a dead band so the level does not jitter |
+
+```math
+\ell \leftarrow \mathrm{clip}\Big(\ell + \tfrac{1}{2000}\,s,\ 0,\ 1\Big) \qquad s = \begin{cases} +1 & \bar e < 12° \\ -1 & \bar e > 24° \\ 0 & \text{otherwise} \end{cases}
+```
+
+The level moves by a fixed step of 1/2000 per policy step, so it can rise no faster than a ramp over 2000 steps (an eighth
+of a 16 000-step run), and it only rises while the rider is competent.
+
+- **One level for everyone.** All 2048 riders share it. The only randomness on top is per episode: the period ±15%, the
+  phase and the first edge side.
+- **When it applies.** The amplitude follows the level live, mid-episode. The period is drawn once per episode, at reset.
+- **Each stage restarts at level 0**, so a warm-started policy is re-eased into the harder command (stage 3 begins at ±25°,
+  not ±45°). Stage 3 finished training at level 1, the full ±45°.
+- **Evaluation** fixes the level at 1, the hardest command.
 
 ### Stage 1: hold a carve (dropped)
 
@@ -556,8 +595,8 @@ learns the hold anyway, because its episodes start in a carve.
 
 - **Start.** Balanced on an edge (80% toe), the command phased to that side's peak. After 3 s, toe-carve states are
   recorded and 50% of episodes restart from them (see below).
-- **Curriculum.** $`A`$ 15 → 30°, $`T`$ 6 → 4 s. At 4–5.5 m/s only 13–24° balances, so a larger amplitude would just be a
-  fall (the ±50° run: 75% of falls were "lying").
+- **Curriculum.** $`A`$ 15 → 30°, $`T`$ 6 → 4 s (see Curriculum, above). At 4–5.5 m/s only 13–24°
+  balances, so a larger amplitude would just be a fall (the ±50° run: 75% of falls were "lying").
 - **Result.** Falls 8%, episodes 9.2 of 10 s, edge error 18°. Eval: toe → heel → toe → heel → toe → heel in one 11.6 s
   run. From a low toe carve the policy reaches the heel 75% of the time with 0% falls.
 
