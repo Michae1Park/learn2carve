@@ -2,6 +2,11 @@ task: carve
 algo: ppo
 seed: 42
 overrides:
+  stiff_boots: false
+  boot_range_deg: {}
+  synergy_toe_rad: {}
+  synergy_smooth: 1.0
+  joint_smooth: 1.0
   edge_target_deg: 40
   binding_angles_deg:
   - 54

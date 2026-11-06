@@ -82,6 +82,23 @@ class SnowboardEnvCfg(CarveEnvCfg):
 
     rewards: RewardsCfg = RewardsCfg()
 
+    # rider: the same in every stage (docs/HUMANOID_MODEL.md §6); stance and bindings come from config.yaml
+    stance_tag = "squat4"
+    rider_to_height = True
+    pelvis_mass_frac = 0.2
+    knee_rotation = True
+    passive_joints = ("knee:2",)
+    ankle_range_deg = {"x": 45, "y": 80, "z": 55}
+    torso_twist_deg = 90.0
+    arm_stiffness_scale = 0.3
+    arm_action_scale = 0.5
+    stiff_boots = True
+    boot_range_deg = {"y": [-5, 15], "x": [-5, 5], "z": [-5, 5]}
+    synergy = True
+    synergy_toe_rad = {"left_knee": 0.4, "right_knee": 0.4, "left_hip_y": -0.3, "right_hip_y": -0.3}
+    synergy_smooth = 0.35
+    joint_smooth = 0.35
+
     speed_cmd = (6.0, 8.0)  # m/s, observed only (saved policies were trained with it)
     start_heading_deg = 20.0
     start_speed_turns = (4.0, 6.0)  # m/s
@@ -90,7 +107,7 @@ class SnowboardEnvCfg(CarveEnvCfg):
     fence_half_width = FENCE_HALF_WIDTH
     run_length: float | None = None  # m, ends the episode as a time-out
     min_turn_deg = 55.0  # swing that makes a turn count when the path crosses back over the fall line
-    lying_deg = 80.0  # torso tilt; a deep toe carve bows it 55-70°
+    lying_deg = 95.0  # torso tilt; a deep toe carve bows it 55-70°
     reverse_slip_deg = 100.0  # tail first at speed counts as a fall
 
     # edge command: a signed edge angle to track, heel → base → toe
