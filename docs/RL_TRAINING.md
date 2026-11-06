@@ -508,7 +508,7 @@ The reward is one set of terms for the whole project (§3). The stages differ in
 | Edge angle | Balanced edge | ±15 → 30° | ±25 → 45° | As stage 3 |
 | Slope, episode | 7°, 4 s | 7°, 10 s | 9°, 20 s | As stage 3 |
 | Reward | Edge tracking, pose reference, fall −10 | Hand grab weight 5, Gaussian | Hand grab weight 10, linear (§3) | As stage 3 |
-| Saved run | none (dropped) | `saved/01_stage2_switches` | `saved/03_stage3_centred` | `saved/04_stage3_tighter` |
+| Saved run | none (dropped) | `saved/01_stage2_switches` | `saved/03_stage3_centred` | `saved/04_stage4_tighter` |
 
 ### The command generators and the curriculum
 
@@ -643,7 +643,15 @@ The whole method as one algorithm, step by step. The equations are those of the 
 
 ### Setup
 
-The policy's trainable numbers, the MLP weights and $`\log\sigma`$, are written together as $`\vartheta`$ here, since $`\theta`$ is the edge angle ([§4](#4-ppo) writes the weights $`\theta`$). The value network's weights are $`w`$.
+**Notation.** Two different things are easy to mix up here:
+
+| Symbol | Meaning |
+|---|---|
+| $`\theta,\ \theta^\ast`$ | The board's **edge angle** and the commanded edge angle (physical quantities, in degrees) |
+| $`\vartheta`$ | The **policy parameters**: the policy MLP's weights plus the 30 numbers $`\log\sigma`$. [§4](#4-ppo) calls these $`\theta`$, the usual RL name; here that letter is taken by the edge angle |
+| $`w`$ | The **value network's weights** |
+
+Only $`\vartheta`$ and $`w`$ are learned. $`\rho_t`$ (with a time index) is the probability ratio of PPO; $`\rho^{\mathrm{edge}}_j`$ etc. (with a joint index) are the synergy vectors of [§2](#from-the-smoothed-action-to-a-joint-target).
 
 | Object | Definition |
 |---|---|
@@ -652,32 +660,70 @@ The policy's trainable numbers, the MLP weights and $`\log\sigma`$, are written 
 | Value | $`V_w(s)`$: a separate MLP, 140-512-256-128-1 |
 | Edge command | $`\theta^\ast_t`$ from the timed or heading generator at difficulty $`\ell`$ ([§5](#the-command-generators-and-the-curriculum)) |
 | Reward | $`r_t`$ ([§3](#3-reward)) |
-| Constants | $`N = 2048`$ riders, $`H = 48`$ steps, $`K = 5`$ epochs, $`M = 8`$ mini-batches, $`\gamma = 0.995`$, $`\lambda = 0.98`$, $`\epsilon = 0.2`$, $`c_V = 1`$, $`c_H = 0.003`$, $`\Delta t = 1/30`$ s, initial learning rate $`10^{-3}`$ |
+| Constants | $`N = 2048`$ riders, $`H = 48`$ steps, $`K = 5`$ epochs, $`M = 8`$ mini-batches, $`\gamma = 0.995`$, $`\lambda = 0.98`$, $`\epsilon = 0.2`$, $`c_V = 1`$, $`c_H = 0.003`$, $`\Delta t = 1/30`$ s, value clip 0.2, gradient-norm clip 1, initial learning rate $`10^{-3}`$ |
+| Normalization | Observations, and the value network's targets, pass through a running mean and std; this is implicit in every $`s_t`$ and $`V_w`$ below |
 
-**Goal.** Find the policy parameters $`\vartheta`$ that maximize the expected discounted reward. Here $`\max_\vartheta`$ means "choose $`\vartheta`$ to make $`J`$ as large as possible"; nothing maximizes $`\log\sigma`$ itself:
+**All other symbols**, in the order they appear below:
+
+| Symbol | Meaning |
+|---|---|
+| $`t`$, $`j`$, $`i`$ | Time step (one policy step, 1/30 s), rider index ($`1..N`$), action component ($`1..30`$) |
+| $`\ell \in [0, 1]`$ | **Curriculum level**: how hard the edge command is. 0 = smallest amplitude (and, for the timed command, the longest period), 1 = the stage's full command ([§5](#curriculum-how-the-difficulty-adapts)) |
+| $`\bar e`$ | Running average of the absolute edge error $`\lvert e\rvert`$ over all upright riders, in degrees; it moves $`\ell`$ |
+| $`\kappa \in \{-1, 0, +1\}`$ | Direction $`\ell`$ moves this step: up when $`\bar e`$ is small, down when large |
+| $`\mathrm{lr}`$ | Adam learning rate |
+| $`x^j_0 \sim p_{\mathrm{start}}`$ | Rider $`j`$'s start state, drawn from the start distribution (position, speed, heading below) |
+| $`\lvert\mathbf v_0\rvert`$, $`\psi`$, $`y`$ | Start speed; path heading (travel direction, 0 = straight down the fall line); position across the trail |
+| $`\psi_0`$, $`U[a, b]`$ | Start heading; a value drawn uniformly at random between $`a`$ and $`b`$, so $`\psi_0 \sim U[-20°, 20°]`$ starts each rider within 20° of straight downhill |
+| $`p_{\mathrm{rec}}`$ | Share of resets that start from a recorded mid-run state instead: 0.5 in stage 2, 0.3 in stages 3–4, [§5](#recorded-state-starts). Config key `rsi_frac` |
+| $`\theta_{\mathrm{bal}}`$ | The edge angle that balances at a given speed ([§1](#1-the-edge-command-a-target-the-rider-tracks)) |
+| $`q, \dot q`$ | Joint angles and velocities |
+| $`\tilde a_t`$ | Smoothed, clipped action; $`\tilde a_j`$ its 28 joint parts, $`\tilde s_0, \tilde s_1`$ its 2 synergy parts |
+| $`q^{\mathrm{stance}}_j,\ q^{\min}_j,\ q^{\max}_j`$ | Joint $`j`$'s stance angle and limits |
+| $`c_j`$ | Per-joint action scale; $`\rho^{\mathrm{edge}}, \rho^{\mathrm{lean}}, \rho^{\mathrm{toe}}`$ the synergy vectors; $`[x]_+ = \max(x, 0)`$ |
+| $`K_p, K_d,\ \tau`$ | PD gains of the joint motors, joint torques |
+| $`F, \tau_b`$ | Snow force and torque on the board |
+| $`v_\parallel, v_\perp, \omega, F_N`$ | Board velocity along and across it, its angular velocity, the normal load on the snow |
+| $`e`$ | Edge error $`\theta - \theta^\ast`$ |
+| $`g_e, g_s, g_p, g_r, g_t, g_h`$ | Reward terms: edge tracking, edge side, pose reference, rise, torso tilt, hand grab ([§3](#3-reward)) |
+| $`\mathbb 1[\cdot]`$ | 1 if the condition holds, else 0 |
+| $`d_t`$, $`u_t`$ | Episode ended by a fall or fence; episode ended by the time limit |
+| $`t_{\mathrm{ep}}, T_{\mathrm{ep}}`$ | Time since the episode started; its limit (10 s stage 2, 20 s stages 3–4) |
+| $`\log\pi^{\mathrm{old}}_t`$, $`v_t`$ | Log-probability of $`a_t`$ and value estimate, both stored at collection time |
+| $`s'_{t+1}`$ | The observation after step $`t`$, taken before any reset |
+| $`\delta_t, \hat A_t, \hat R_t`$ | TD error, advantage (how much better $`a_t`$ did than expected), value target |
+| $`\rho_t`$ | Probability ratio, new policy over old, for the stored action |
+| $`\mathcal L_{\mathrm{clip}}, \mathcal L_V, \mathcal H(\pi), \mathcal L`$ | Clipped policy objective, value loss, policy entropy, total loss |
+| $`\phi`$, $`G`$ | All learned numbers $`(\vartheta, w)`$; the gradient of $`\mathcal L`$ with respect to them |
+| $`m_1, m_2, \beta_1, \beta_2, n`$ | Adam's running mean of $`G`$ and of $`G^2`$, their decay rates, the number of updates so far |
+| $`\overline{\mathrm{KL}}`$ | How far the policy moved in one epoch, estimated from $`\rho_t`$ |
+
+**Goal.** $`J(\vartheta)`$ is the expected discounted reward when the rider acts with policy $`\pi_\vartheta`$. Training looks for the parameters $`\vartheta^\ast`$ that make it largest:
 
 ```math
-\max_{\vartheta}\ J(\vartheta) = \mathbb{E}_{\pi_\vartheta}\Big[\sum_{t \ge 0} \gamma^t\, r_t\Big]
+J(\vartheta) = \mathbb{E}_{\pi_\vartheta}\Big[\sum_{t \ge 0} \gamma^t\, r_t\Big] \qquad \vartheta^\ast = \arg\max_{\vartheta}\ J(\vartheta)
 ```
+
+PPO does not solve this in one go; each iteration below takes a few gradient steps that raise $`J`$.
 
 ### Initialize (per stage)
 
 ```math
 \begin{aligned}
-&\vartheta,\ w \leftarrow \text{previous stage's weights (stage 2: random)} \\
-&\log\sigma \leftarrow -1 \quad (\text{part of } \vartheta) \\
+&\vartheta,\ w \leftarrow \text{previous stage's values, normalizers included (stage 2: random)} \\
+&\log\sigma \leftarrow -1 \quad (\text{reset each stage, overriding the loaded value}) \\
 &\ell \leftarrow 0 \qquad \bar e \leftarrow 90° \qquad \mathrm{lr} \leftarrow 10^{-3}
 \end{aligned}
 ```
 
 ```math
 \begin{aligned}
-&\text{every rider } j:\ x^j_0 \sim p_{\mathrm{start}}, \quad v_0 \sim U[4, 5.5]\ \mathrm{m/s}, \quad \psi_0 \sim U[-20°, 20°] \\
-&\text{or, with probability } \mathrm{rsi\_frac},\ \text{a recorded state}
+&\text{every rider } j:\ x^j_0 \sim p_{\mathrm{start}}, \quad \lvert\mathbf v_0\rvert \sim U[4, 5.5]\ \mathrm{m/s}, \quad \psi_0 \sim U[-20°, 20°] \\
+&\text{or, with probability } p_{\mathrm{rec}},\ \text{a recorded state}
 \end{aligned}
 ```
 
-Stage 2 instead starts every rider balanced on an edge, the toe side with probability 0.8: $`\theta_0 = \pm\theta_{\mathrm{bal}}(v_0)`$, the balanced edge of [§1](#1-the-edge-command-a-target-the-rider-tracks).
+Stage 2 instead starts every rider balanced on an edge, the toe side with probability 0.8: $`\theta_0 = \pm\theta_{\mathrm{bal}}(\lvert\mathbf v_0\rvert)`$, the balanced edge of [§1](#1-the-edge-command-a-target-the-rider-tracks).
 
 ### Repeat for each iteration (333 per 16 000-step run)
 
@@ -700,7 +746,7 @@ s_t = \big[\,&q,\ \dot q,\ \text{torso},\ \text{hands and feet},\ \text{board},\
 
 ```math
 \begin{aligned}
-a_t &\sim \mathcal{N}\big(\mu_\vartheta(s_t),\ \sigma^2\big) \\
+a_t &\sim \mathcal{N}\big(\mu_\vartheta(s_t),\ \mathrm{diag}\,\sigma^2\big), \quad \log\sigma \le -0.3 \\
 \log\pi^{\mathrm{old}}_t &= \log\pi_\vartheta(a_t \mid s_t) \qquad v_t = V_w(s_t)
 \end{aligned}
 ```
@@ -726,7 +772,7 @@ q^\ast_j = \mathrm{clip}\big(&q^{\mathrm{stance}}_j + c_j\,\tfrac12(q^{\max}_j -
 \begin{aligned}
 &\text{for } m = 1, \dots, 4: \\
 &\qquad \tau = K_p\,(q^\ast_t - q) - K_d\,\dot q \\
-&\qquad (F, \tau_b) = \mathrm{snow}(\theta, v_\parallel, v_\perp, \omega, N) \\
+&\qquad (F, \tau_b) = \mathrm{snow}(\theta, v_\parallel, v_\perp, \omega, F_N) \\
 &\qquad (q, \dot q, \text{board}) \leftarrow \mathrm{PhysX}(\tau, F, \tau_b)
 \end{aligned}
 ```
@@ -762,7 +808,7 @@ d_t &= \mathbb{1}[\text{fall or fence}] \qquad u_t = \mathbb{1}[t_{\mathrm{ep}} 
 ```math
 \begin{aligned}
 \bar e &\leftarrow 0.99\,\bar e + 0.01\,\mathrm{mean}_j\lvert e\rvert \quad (\text{riders still upright}) \\
-\ell &\leftarrow \mathrm{clip}\Big(\ell + \tfrac{1}{2000}\,s,\ 0,\ 1\Big) \qquad s = \begin{cases} +1 & \bar e < 12° \\ -1 & \bar e > 24° \\ 0 & \text{otherwise} \end{cases}
+\ell &\leftarrow \mathrm{clip}\Big(\ell + \tfrac{1}{2000}\,\kappa,\ 0,\ 1\Big) \qquad \kappa = \begin{cases} +1 & \bar e < 12° \\ -1 & \bar e > 24° \\ 0 & \text{otherwise} \end{cases}
 \end{aligned}
 ```
 
@@ -803,40 +849,40 @@ d_t &= \mathbb{1}[\text{fall or fence}] \qquad u_t = \mathbb{1}[t_{\mathrm{ep}} 
 ```math
 \begin{aligned}
 \mathcal{L}_V &= c_V\,\mathbb{E}\big[(\hat R_t - V^{\mathrm{clip}}_w(s_t))^2\big] \\
-H(\pi) &= \sum_{i=1}^{30}\big(\log\sigma_i + \tfrac12\log 2\pi e\big)
+\mathcal{H}(\pi) &= \sum_{i=1}^{30}\big(\log\sigma_i + \tfrac12\log 2\pi e\big)
 \end{aligned}
 ```
 
 **(14) Total loss**
 
 ```math
-\mathcal{L} = -\mathcal{L}_{\mathrm{clip}} + \mathcal{L}_V - c_H\,H(\pi)
+\mathcal{L} = -\mathcal{L}_{\mathrm{clip}} + \mathcal{L}_V - c_H\,\mathcal{H}(\pi)
 ```
 
-**(15) Update function** ▹ gradient, norm clip, Adam step on every trainable number $`\phi = (\vartheta, w)`$
+**(15) Update** ▹ gradient, norm clip, Adam step on all learned parameters together, $`\phi = (\vartheta, w)`$. The second line shows what the policy part of the gradient is: samples whose ratio is already clipped contribute nothing
 
 ```math
 \begin{aligned}
-g &= \nabla_\phi \mathcal{L} \\
+G &= \nabla_\phi \mathcal{L} \\
 \nabla_\vartheta \mathcal{L}_{\mathrm{clip}} &= \mathbb{E}\Big[\mathbb{1}[\text{not clipped}]\ \rho_t\,\hat A_t\ \nabla_\vartheta \log\pi_\vartheta(a_t \mid s_t)\Big]
 \end{aligned}
 ```
 
 ```math
 \begin{aligned}
-g &\leftarrow g\cdot\min\big(1,\ 1/\lVert g\rVert\big) \\
-m &\leftarrow \beta_1 m + (1-\beta_1)\,g \qquad u \leftarrow \beta_2 u + (1-\beta_2)\,g \odot g
+G &\leftarrow G\cdot\min\big(1,\ 1/\lVert G\rVert\big) \\
+m_1 &\leftarrow \beta_1 m_1 + (1-\beta_1)\,G \qquad m_2 \leftarrow \beta_2 m_2 + (1-\beta_2)\,G \odot G
 \end{aligned}
 ```
 
 ```math
 \begin{aligned}
-&\phi \leftarrow \phi - \mathrm{lr}\ \frac{m/(1-\beta_1^{\,n})}{\sqrt{u/(1-\beta_2^{\,n})} + 10^{-8}} \\
+&\phi \leftarrow \phi - \mathrm{lr}\ \frac{m_1/(1-\beta_1^{\,n})}{\sqrt{m_2/(1-\beta_2^{\,n})} + 10^{-8}} \\
 &\beta_1 = 0.9,\ \ \beta_2 = 0.999,\ \ n = \text{update count}
 \end{aligned}
 ```
 
-**(ii) Learning rate** ▹ side step, optimizer-internal, once per epoch; $`\overline{\mathrm{KL}}`$ is the mean of $`\rho_t - 1 - \log\rho_t`$ over the epoch
+**(ii) Learning rate** ▹ side step, optimizer-internal, once per epoch; $`\overline{\mathrm{KL}}`$, an estimate of how far the policy moved, is the mean of $`\rho_t - 1 - \log\rho_t`$ over the epoch. Target 0.01: the rate shrinks above twice that, grows below half
 
 ```math
 \begin{aligned}
@@ -845,7 +891,7 @@ m &\leftarrow \beta_1 m + (1-\beta_1)\,g \qquad u \leftarrow \beta_2 u + (1-\bet
 \end{aligned}
 ```
 
-**(16) Discard** ▹ once per iteration, after all epochs: the buffer came from the old policy, so it is dropped, and the loop returns to (1)
+**(16) Discard** ▹ once per iteration, after all epochs: the buffer came from the old policy, so it is dropped; the updated $`\vartheta`$ becomes the policy that collects the next batch in (1)
 
 ```math
 \begin{aligned}
@@ -877,42 +923,75 @@ pelvis height per step).
 
 ## 8. Results
 
-### Stage 3 (`saved/03_stage3_centred`)
+Each stage is warm-started from the one before. Stage 4 (`saved/04_stage4_tighter`) is the final policy, trained for
+16 000 steps per rider (333 iterations), seed 42; its saved checkpoint is the run's last one.
 
-| | Training (end) | Eval (90 s) |
+| | Stage 2: switch (`01_stage2_switches`) | Stage 3: course (`03_stage3_centred`) | Stage 4: tighter (`04_stage4_tighter`) |
+|---|---|---|---|
+| Command | Timed wave, up to ±30° | Heading switch at 50°, up to ±45° | Heading switch at 40°, up to ±45° |
+| **Training (end)** | | | |
+| Episode length | 9.2 of 10 s | 19.6 of 20 s | 19.7 of 20 s |
+| Falls / fence | 8% / – | 0% / 2% | 1.5% / 2.2% |
+| Edge error | 18° | 5° | 5.7° |
+| Turns | | 1.7 per 10 s | 1.9 per 10 s |
+| **Eval (longest run, `ride.csv`)** | | | |
+| Runs finishing the 100 m course | | 5 of 5 | 5 of 5, in 15–17.5 s |
+| Edge changes | 8 | 5 | 5, in a shorter run |
+| Turns per 100 m | | 3–4 | **4–5** |
+| Edge (toe / heel), mean | 31° / 28° | 42° / 38° | 43° / 38° |
+| Edge (toe / heel), max | 46° / 48° | 52° / 48° | 57° / 48° |
+| Mean heading across the hill | | 38–42° (switches overshoot to 91°) | 35–39° |
+| Slip | 3.2° | 2.5° | 3.5° |
+| Mean speed | 7.3 m/s | 7.9 m/s | 7.9 m/s |
+| Track (fences at ±20 m) | −6 to +14 m | −13 to +8 m | −15 to +4 m |
+
+Stage 2's edge error is measured against a smaller, timed command, so it doesn't compare directly with stages 3–4.
+Empty cells were not measured for that stage.
+
+### Stage 2 → 3: from switching to riding a course
+
+| What changed | Stage 2 | Stage 3 |
 |---|---|---|
-| Runs reaching the end of the course | episodes 19.6 of 20 s | **5 of 5** |
-| Falls / fence | 0% / 2% | 0 / 0 |
-| Edge error | 5° at ±45° | |
-| Edge (toe / heel) | | mean 42° / 38°, max 52° / 48° |
-| Slip | | 2.5°: a clean carve, a thin line |
-| Turns | 1.7 per 10 s | 3–4 per run, an edge change every ~3.8 s |
-| Track | | −13 to +8 m from the center (fences at ±20 m) |
+| Edge command | Timed wave, flips on a clock | Flips when the board's heading reaches 50° across the hill, shifted toward the center |
+| Command amplitude | 15 → 30° | 25 → 45° |
+| Slope, episode | 7°, 10 s | 9°, 20 s |
+| Start | Balanced on an edge | Flat, near the fall line |
 
-![Track of the longest eval run: a thin centered S down 100 m](../saved/03_stage3_centred/trail.png)
+| Improvement | Stage 2 | Stage 3 |
+|---|---|---|
+| Edge angle | 31° / 28° | **42° / 38°** |
+| Edge error | 18° | **5°** |
+| Falls (training) | 8% | **0%** |
+| Track | Drifts to +14 m | **Centered S**, −13 to +8 m |
 
-The turns overshoot: the heading reaches 56–91° across the hill at the switch, aimed at 50–60°. The board also skids
-briefly through each edge change.
+| Stage 2 | Stage 3 |
+|---|---|
+| ![Stage 2 track](../saved/01_stage2_switches/trail.png) | ![Stage 3 track: a thin centered S](../saved/03_stage3_centred/trail.png) |
 
-### Stage 4: tighter turns (`saved/04_stage3_tighter`)
+Left over: stage 3's turns overshoot. The edge command only flips once $`\psi`$ passes the switch heading, and the board
+keeps swinging while the command ramps through flat, so the heading at the switch reaches 56–91°, aimed at 50–60°.
 
-The overshoot is the heading switch firing late: the edge command only flips once $`\psi`$ passes the switch heading,
-and the board keeps swinging while the command ramps through flat. Switching earlier ends the turn nearer the target.
-Stage 4 does this, warm-started from stage 3:
+### Stage 3 → 4: tighter turns
 
-| Setting | Stage 3 | Stage 4 | Effect |
+| What changed | Stage 3 | Stage 4 | Effect |
 |---|---|---|---|
 | `edge_cmd_heading_deg` | 50 | 40 | Switch the edge at 40° across the hill: no overshoot, no flat cross-hill segment |
 | `edge_cmd_center_max_deg` | 25 | 10 | Smaller centering shift, so the switch heading stays near 40° |
 
-| | Stage 3 | Stage 4 |
+| Improvement | Stage 3 | Stage 4 |
 |---|---|---|
 | Turns per 100 m | 3–4 | **4–5** |
-| Mean speed | 7.9 m/s | 7.9 m/s |
-| Edge (toe / heel) | 42° / 38° | 43° / 38° |
-| Slip | 2.5° | ~3° |
+| Mean heading across the hill | 38–42°, overshoot to 91° | **35–39°**, no overshoot |
+| Edge angle, max toe | 52° | **57°** |
+| Speed | 7.9 m/s | 7.9 m/s (unchanged) |
 
-GIFs: `docs/demo/04_stage3_tighter_front.gif`, `_top.gif`.
+| Stage 3 | Stage 4 |
+|---|---|
+| ![Stage 3 track](../saved/03_stage3_centred/trail.png) | ![Stage 4 track: a tighter thin S](../saved/04_stage4_tighter/trail.png) |
+
+Cost: slip went from 2.5° to 3.5°, and training falls from 0% to 1.5%. Both still skid briefly through each edge change.
+
+GIFs of stage 4: `docs/demo/04_stage4_tighter_front.gif`, `_top.gif`.
 
 ## Not solved
 

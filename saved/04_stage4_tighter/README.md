@@ -1,4 +1,4 @@
-# Stage 3, tighter turns
+# Stage 4, tighter turns
 Recipe: `scripts/train_stage3_full_s.sh` with `edge_cmd_heading_deg=40 edge_cmd_center_max_deg=10` (switch the edge at
 40° across the hill instead of 50°, centring shift capped at 10°), warm-started from `saved/03_stage3_centred`,
 16000 steps. Checkpoint is the run's final one.

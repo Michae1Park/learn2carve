@@ -27,9 +27,9 @@ modified for snowboarding, and is trained with PPO in stages.
 
 <div align="center">
 
-<img src="docs/demo/04_stage3_tighter_front.gif" width="600" alt="Carving, front view">
+<img src="docs/demo/04_stage4_tighter_front.gif" width="600" alt="Carving, front view">
 
-<img src="docs/demo/04_stage3_tighter_top.gif" width="600" alt="Carving, top view: a thin S line">
+<img src="docs/demo/04_stage4_tighter_top.gif" width="600" alt="Carving, top view: a thin S line">
 
 <img src="docs/demo/training.gif" width="600" alt="Isaac Sim: 64 riders in parallel, as in training">
 
@@ -77,10 +77,10 @@ scripts/install.sh   # Isaac Sim 6.1 + Isaac Lab + skrl, into .venv-sim
 
 ```bash
 # Watch a trained rider carve
-scripts/py playground/snowboard/play.py saved/04_stage3_tighter
+scripts/py playground/snowboard/play.py saved/04_stage4_tighter
 
 # ...with the live stream (Isaac Sim viewport)
-scripts/py playground/snowboard/play.py saved/04_stage3_tighter --livestream 2 --follow
+scripts/py playground/snowboard/play.py saved/04_stage4_tighter --livestream 2 --follow
 
 # Train: stage 2 from scratch, then stage 3 and stage 4, each warm-started from the last
 scripts/py playground/snowboard/train.py --stage stage2
