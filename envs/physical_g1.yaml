@@ -7,7 +7,7 @@ rider:                    # Unitree G1 29-DoF + Dex3 hands, stock (Isaac Lab G1_
   mass: 34.0              # kg, the USD's own masses (not rescaled)
   stance: regular         # left foot forward (toward the nose)
   stance_width: 0.35      # binding centre to centre: ~ the G1 shank (knee to sole 0.354 m)
-  binding_angles_deg: [60.0, 50.0]   # steep forward stance: hips face the nose, toes and heels stay off the snow at a high edge
+  binding_angles_deg: [30.0, 15.0]   # edging goes mostly through ankle pitch (−50…30°), not the ±15° ankle roll
 
 board:                    # the adult board scaled to 142 cm (k = 1.42 / 1.52 = 0.934): length, widths and sidecut × k
   length: 1.42            # 142 cm

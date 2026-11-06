@@ -270,6 +270,13 @@ class CarveEnv(DirectRLEnv):
 
         stance = load_stance(configured_binding_angles(self.cfg), self.cfg.stance_tag)
         self.stance_pos = self.robot.data.default_joint_pos.torch.clone()
+        # zero-action targets: the stance's holding targets (scripts/feed_forward.py) where it has them, so soft drives
+        # hold the pose under gravity; otherwise the stance itself
+        self.stance_target = self.stance_pos.clone()
+        names = self.robot.joint_names
+        for name, value in stance.get("joint_target", {}).items():
+            if name in names:
+                self.stance_target[:, names.index(name)] = value
         self.pelvis_in_board_pos = torch.tensor(stance["pelvis_pos"], device=self.device)
         self.pelvis_in_board_quat = torch.tensor(stance["pelvis_quat"], device=self.device)
         self.board_half_thickness = params["board"]["thickness"] / 2
@@ -392,7 +399,7 @@ class CarveEnv(DirectRLEnv):
         self.actions = smooth(self.actions, actions, self.cfg.joint_smooth)
 
     def _apply_action(self):
-        target = self.stance_pos.clone()
+        target = self.stance_target.clone()
         if self.cfg.synergy:
             residual = torch.where(self.free_joint[self.actuated], 1.0, self.cfg.synergy_residual)
             target[:, self.actuated] += residual * self.action_scale * self.actions

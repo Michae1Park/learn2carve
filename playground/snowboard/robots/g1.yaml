@@ -14,8 +14,13 @@ env:
   arm_stiffness_scale: 1.0
   stiff_boots: false
   boot_range_deg: {}
-  # edge synergy, + = toe edge: shins forward (knees flex, ankles dorsiflex); lean: waist side-bend
-  synergy_edge_rad: {left_knee_joint: 0.5, right_knee_joint: 0.5, left_ankle_pitch_joint: -0.3, right_ankle_pitch_joint: -0.3}
+  # edge synergy, + = toe edge: fitted at the stance (least-norm joint mix that moves the COM 10 cm toward the toe
+  # edge per unit, no change along the board or in height); mostly ankle dorsiflexion, ankle roll and waist roll
+  synergy_edge_rad: {left_hip_pitch_joint: -0.074, right_hip_pitch_joint: -0.023, left_hip_roll_joint: 0.033,
+                     right_hip_roll_joint: 0.016, right_hip_yaw_joint: -0.100, left_knee_joint: -0.043,
+                     right_knee_joint: -0.064, left_ankle_pitch_joint: -0.222, right_ankle_pitch_joint: -0.251,
+                     left_ankle_roll_joint: -0.136, right_ankle_roll_joint: -0.078, waist_roll_joint: -0.118,
+                     waist_pitch_joint: 0.051, waist_yaw_joint: -0.068}
   synergy_lean_rad: {waist_roll_joint: 0.4}
   synergy_toe_rad: {}
   arm_action_scale: 0.25        # shoulder half-range ~165°: 0.5 swung the arms ±1.4 rad per unit action
