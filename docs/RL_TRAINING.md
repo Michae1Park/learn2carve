@@ -3,9 +3,15 @@
 One env (`playground/snowboard/env.py`, task `carve`) and plain **PPO** (`skrl`). The rider learns linked carved
 turns by **tracking a commanded edge angle**: a heel ↔ toe edge command plays the part of the turn planner, and the
 policy learns to put the board on that edge and stay up. Training runs in **stages**, each warm-started from the
-last. No demonstration and no motion data. Settings live in three places: `SnowboardEnvCfg` in
-`playground/snowboard/env.py` (env and reward; override with `--set key=value`), the stage scripts in `scripts/`,
-and the PPO settings in `playground/snowboard/ppo.yaml`. SI units; angles in ° unless marked rad.
+last. No demonstration and no motion data. SI units; angles in ° unless marked rad.
+
+| Settings | Where | Override |
+|---|---|---|
+| Env: rider, slope, edge command, starts | `SnowboardEnvCfg` in `playground/snowboard/env.py`, set per stage by `scripts/train_stage*.sh` | `--set key=value` |
+| Reward weights and term shapes | `playground/snowboard/rewards/stage2.yaml`, `stage3.yaml` (fields of `RewardsCfg`) | `--rewards FILE`, `--set rewards.key=value` |
+| PPO | `playground/snowboard/ppo.yaml` | edit the file |
+
+A run's `run.yaml` records its rewards and overrides; `play.py` and the diagnostics replay them.
 
 ![Training loop: policy at 30 Hz, PD joints, snow model and PhysX at 120 Hz, rewards, PPO update every 48 steps](rider/training_loop.svg)
 
@@ -43,13 +49,12 @@ running edge error is below 12° and falls above 24°. The policy sees the comma
 
 | Stage | Script | Start | Episode | Slope | Command | Speed |
 |---|---|---|---|---|---|---|
-| 1. Hold a carve | `train_stage1_carve.sh` | Balanced on an edge | 4 s | 7° | Hold the balanced edge | 5–7.5 m/s |
 | **2. Change edges** | `train_stage2_transition.sh` | Balanced on an edge (80% toe), 50% from recorded toe-carve states | 10 s | 7° | Timed, ±15 → 30°, $T$ 6 → 4 s | 4–5.5 m/s |
 | **3. Full S** | `train_stage3_full_s.sh` | Flat, heading within ±20° of the fall line, 4–5.5 m/s; 30% recorded states | 20 s | 9° | Heading + centring, ±25 → 45° | free (eval mean 7.9 m/s) |
 
-**Stage 1 is skipped.** Stage 2 warm-started from stage 1 never learned to change edges (it kept holding the edge
-stage 1 taught); stage 2 from scratch learns the hold anyway, because its episodes start in a carve. The demo runs
-stage 2 from scratch, continues it, then warm-starts stage 3 from it.
+**No hold-only stage.** An earlier stage 1 trained only to hold a carve; stage 2 warm-started from it never learned
+to change edges (it kept holding the edge stage 1 taught). Stage 2 from scratch learns the hold anyway, because its
+episodes start in a carve. The demo runs stage 2 from scratch, continues it, then warm-starts stage 3 from it.
 
 **Recorded-state starts** (`rsi_frac`). During training the env records rider states from more than 3 s into an
 episode on the toe edge (the low, bowed carve where the switch to the heel is hardest) and restarts a share of
@@ -71,13 +76,14 @@ policy had learned to switch from.
 
 ## 4. Reward
 
-Each step, with $\Delta t = 1/30$ s, $e = \theta - \theta^*$:
+Weights per stage in `playground/snowboard/rewards/` (stage 3 below). Each step, with $\Delta t = 1/30$ s,
+$e = \theta - \theta^*$:
 
 $$r = \Delta t \sum_i w_i\, r_i \;+\; w_{\text{fall}}\,\mathbb{1}[\text{fall or fence}]$$
 
 | Term | $r_i$ | $w_i$ |
 |---|---|---|
-| **Edge command** | $e^{-(e/\sigma)^2}$, $\sigma$ = 30° (stage 1: 12°), × 0 while the board is flat ($\lvert\theta\rvert$ < 10°, full from 20°): a flat board never pays | 30 |
+| **Edge command** | $e^{-(e/\sigma)^2}$, $\sigma$ = 30°, × 0 while the board is flat ($\lvert\theta\rvert$ < 10°, full from 20°): a flat board never pays | 30 |
 | **Edge side** | +1 on the commanded side, −1 on the other ($\lvert\theta^*\rvert$ > 10°, $\lvert\theta\rvert$ > 3°): starting the switch pays before the angle matches | 20 |
 | **Pose reference** | $e^{-((\phi_{\text{legs}} - 1.15\theta^*)/15°)^2}\, e^{-((\phi_{\text{CoM}} - 0.77 \cdot 1.15\theta^*)/15°)^2}$: legs lean past the edge, centre of mass lean less (angulation), from the pendulum model; 0 near flat | 10 |
 | **Rise** | while $\lvert\theta^*\rvert$ < 8°: clip((pelvis height − 0.35 m) / 0.2 m): come up through the edge change | 30 |

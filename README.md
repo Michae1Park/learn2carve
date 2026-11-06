@@ -54,7 +54,7 @@ modified for snowboarding, and is trained with PPO in stages.
 
 | Doc | What |
 |---|---|
-| [RL training](docs/RL_TRAINING.md) | MDP, reward, staged PPO, learning curves |
+| [RL training](docs/RL_TRAINING.md) | MDP, reward, staged PPO, results |
 
 ## Quick start
 
@@ -82,6 +82,7 @@ scripts/py playground/snowboard/play.py saved/03_stage3_centred
 # ...with the live stream (Isaac Sim viewport)
 scripts/py playground/snowboard/play.py saved/03_stage3_centred --livestream 2 --follow
 
-# Train from scratch
-scripts/py playground/snowboard/train.py --task carve --set slope_deg=10
+# Train: stage 2 from scratch, then stage 3 warm-started from it
+scripts/train_stage2_transition.sh
+scripts/train_stage3_full_s.sh --init_from logs/playground/snowboard/<stage 2 run>
 ```
