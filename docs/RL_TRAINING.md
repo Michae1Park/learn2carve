@@ -637,7 +637,230 @@ Two iterations of the command:
 bowed carve where the switch to the heel is hardest) and restarts a share of episodes from them, with the command at the
 toe peak. Without them every episode started tall, the only pose the policy had learned to switch from.
 
-## 6. Evaluation (`playground/snowboard/play.py`)
+## 6. Putting it all together
+
+The whole method as one algorithm, step by step. The equations are those of the sections above, in the order they run.
+
+### Setup
+
+The policy's trainable numbers, the MLP weights and $`\log\sigma`$, are written together as $`\vartheta`$ here, since $`\theta`$ is the edge angle ([§4](#4-ppo) writes the weights $`\theta`$). The value network's weights are $`w`$.
+
+| Object | Definition |
+|---|---|
+| State and action | $`s_t \in \mathbb{R}^{140}`$ (observation), $`a_t \in \mathbb{R}^{30}`$, joint targets $`q^\ast_t`$ ([§2](#2-mdp)) |
+| Policy | $`\pi_\vartheta(a \mid s) = \mathcal{N}\big(\mu_\vartheta(s),\ \mathrm{diag}\,\sigma^2\big)`$, $`\mu_\vartheta`$ an MLP 140-512-256-128-30, $`\log\sigma \in \mathbb{R}^{30}`$ learned |
+| Value | $`V_w(s)`$: a separate MLP, 140-512-256-128-1 |
+| Edge command | $`\theta^\ast_t`$ from the timed or heading generator at difficulty $`\ell`$ ([§5](#the-command-generators-and-the-curriculum)) |
+| Reward | $`r_t`$ ([§3](#3-reward)) |
+| Constants | $`N = 2048`$ riders, $`H = 48`$ steps, $`K = 5`$ epochs, $`M = 8`$ mini-batches, $`\gamma = 0.995`$, $`\lambda = 0.98`$, $`\epsilon = 0.2`$, $`c_V = 1`$, $`c_H = 0.003`$, $`\Delta t = 1/30`$ s, initial learning rate $`10^{-3}`$ |
+
+**Goal.** Find the policy parameters $`\vartheta`$ that maximize the expected discounted reward. Here $`\max_\vartheta`$ means "choose $`\vartheta`$ to make $`J`$ as large as possible"; nothing maximizes $`\log\sigma`$ itself:
+
+```math
+\max_{\vartheta}\ J(\vartheta) = \mathbb{E}_{\pi_\vartheta}\Big[\sum_{t \ge 0} \gamma^t\, r_t\Big]
+```
+
+### Initialize (per stage)
+
+```math
+\begin{aligned}
+&\vartheta,\ w \leftarrow \text{previous stage's weights (stage 2: random)} \\
+&\log\sigma \leftarrow -1 \quad (\text{part of } \vartheta) \\
+&\ell \leftarrow 0 \qquad \bar e \leftarrow 90° \qquad \mathrm{lr} \leftarrow 10^{-3}
+\end{aligned}
+```
+
+```math
+\begin{aligned}
+&\text{every rider } j:\ x^j_0 \sim p_{\mathrm{start}}, \quad v_0 \sim U[4, 5.5]\ \mathrm{m/s}, \quad \psi_0 \sim U[-20°, 20°] \\
+&\text{or, with probability } \mathrm{rsi\_frac},\ \text{a recorded state}
+\end{aligned}
+```
+
+Stage 2 instead starts every rider balanced on an edge, the toe side with probability 0.8: $`\theta_0 = \pm\theta_{\mathrm{bal}}(v_0)`$, the balanced edge of [§1](#1-the-edge-command-a-target-the-rider-tracks).
+
+### Repeat for each iteration (333 per 16 000-step run)
+
+Steps $`(1), (2), \dots`$ are the main flow, in reading order. Side steps $`(\mathrm i), (\mathrm{ii})`$ tune the environment and the optimizer but are not in the data or gradient path. The italic lines say which loop the steps below them sit in.
+
+**Roadmap:** collect (1)–(8) → advantages (9)–(10) → update (11)–(15) → discard (16), repeated until training ends, then output (17).
+
+*Loop over time:* for $`t = 0, \dots, H-1`$, all $`N`$ riders in parallel, steps (1)–(8)
+
+**(1) Observe** ▹ [§2](#2-mdp)
+
+```math
+\begin{aligned}
+s_t = \big[\,&q,\ \dot q,\ \text{torso},\ \text{hands and feet},\ \text{board},\ \tilde a_{t-1},\ \text{task}, \\
+&\theta^\ast_t,\ \theta^\ast_{t+0.3},\ \theta^\ast_{t+0.6}\,\big] \in \mathbb{R}^{140}
+\end{aligned}
+```
+
+**(2) Sample an action** ▹ exploration; the raw sample is what is stored
+
+```math
+\begin{aligned}
+a_t &\sim \mathcal{N}\big(\mu_\vartheta(s_t),\ \sigma^2\big) \\
+\log\pi^{\mathrm{old}}_t &= \log\pi_\vartheta(a_t \mid s_t) \qquad v_t = V_w(s_t)
+\end{aligned}
+```
+
+**(3) Clip and smooth** ▹ env, not part of the policy; all 30 components (28 joint residuals $`\tilde a_j`$, 2 synergies $`\tilde s_0, \tilde s_1`$)
+
+```math
+\tilde a_t = 0.65\,\tilde a_{t-1} + 0.35\,\mathrm{clip}(a_t, -1, 1)
+```
+
+**(4) Joint targets** ▹ stance + residual + synergies, clipped to the joint limits; $`c_j`$ and $`\rho`$ as in [§2](#from-the-smoothed-action-to-a-joint-target)
+
+```math
+\begin{aligned}
+q^\ast_j = \mathrm{clip}\big(&q^{\mathrm{stance}}_j + c_j\,\tfrac12(q^{\max}_j - q^{\min}_j)\,\tilde a_j \\
+&+ \tilde s_0\rho^{\mathrm{edge}}_j + \tilde s_1\rho^{\mathrm{lean}}_j + [\tilde s_0]_+\rho^{\mathrm{toe}}_j,\ \ q^{\min}_j,\ q^{\max}_j\big)
+\end{aligned}
+```
+
+**(5) Physics** ▹ 4 substeps at 120 Hz, $`q^\ast_t`$ held fixed ([snow model](SNOW_MODEL.md))
+
+```math
+\begin{aligned}
+&\text{for } m = 1, \dots, 4: \\
+&\qquad \tau = K_p\,(q^\ast_t - q) - K_d\,\dot q \\
+&\qquad (F, \tau_b) = \mathrm{snow}(\theta, v_\parallel, v_\perp, \omega, N) \\
+&\qquad (q, \dot q, \text{board}) \leftarrow \mathrm{PhysX}(\tau, F, \tau_b)
+\end{aligned}
+```
+
+**(6) Edge error** ▹ the command moves on, and the error is measured
+
+```math
+\theta^\ast_{t+1} = \mathrm{generator}(\ell,\ \psi,\ y,\ t) \qquad e_{t+1} = \theta_{t+1} - \theta^\ast_{t+1}
+```
+
+**(7) Reward** ▹ the terms $`g`$ are those of [§3](#3-reward), evaluated with $`e_{t+1}`$ from (6)
+
+```math
+\begin{aligned}
+r_t = \Delta t\big[\,&30\,g_e + 20\,g_s + 10\,g_p + 30\,g_r - 10\,g_t + 10\,g_h\big] \\
+&- 50\ \mathbb{1}[\text{fall or fence}]
+\end{aligned}
+```
+
+**(8) Termination and reset** ▹ [§2](#when-an-episode-ends); a fall or fence ends the return, a time-out $`u_t`$ does not
+
+```math
+\begin{aligned}
+d_t &= \mathbb{1}[\text{fall or fence}] \qquad u_t = \mathbb{1}[t_{\mathrm{ep}} > T_{\mathrm{ep}}] \\
+&\text{if } d_t \lor u_t:\ \text{reset rider } j,\ x^j_0 \sim p_{\mathrm{start}}
+\end{aligned}
+```
+
+**Stored at every step:** $`(s_t, a_t, \log\pi^{\mathrm{old}}_t, r_t, d_t, u_t, v_t)`$ for every rider. After $`H`$ steps the buffer holds $`H N = 98\,304`$ transitions.
+
+**(i) Curriculum** ▹ side step: env-internal, every step, alongside (6)–(8). One level is shared by all riders ([§5](#curriculum-how-the-difficulty-adapts)). It changes the next command in (6), not the stored transition
+
+```math
+\begin{aligned}
+\bar e &\leftarrow 0.99\,\bar e + 0.01\,\mathrm{mean}_j\lvert e\rvert \quad (\text{riders still upright}) \\
+\ell &\leftarrow \mathrm{clip}\Big(\ell + \tfrac{1}{2000}\,s,\ 0,\ 1\Big) \qquad s = \begin{cases} +1 & \bar e < 12° \\ -1 & \bar e > 24° \\ 0 & \text{otherwise} \end{cases}
+\end{aligned}
+```
+
+*After the rollout, once per iteration,* over each rider's $`H`$ steps, steps (9)–(10) ([§4](#advantage-estimation-gae))
+
+**(9) GAE** ▹ backward in time. $`s'_{t+1}`$ is the observation before any reset, so a time-out is bootstrapped; the recursion is cut at any episode end
+
+```math
+\begin{aligned}
+\delta_t &= r_t + \gamma\,(1 - d_t)\,V_w(s'_{t+1}) - v_t \\
+\hat A_t &= \delta_t + \gamma\lambda\,(1 - d_t)(1 - u_t)\,\hat A_{t+1} \\
+\hat R_t &= \hat A_t + v_t
+\end{aligned}
+```
+
+**(10) Normalize** ▹ over the whole buffer, once
+
+```math
+\hat A_t \leftarrow \frac{\hat A_t - \mathrm{mean}(\hat A)}{\mathrm{std}(\hat A) + 10^{-8}}
+```
+
+*Loop over epochs and mini-batches:* for each of $`K = 5`$ epochs, for each of $`M = 8`$ shuffled mini-batches, steps (11)–(15); side step (ii) once per epoch ([§4](#the-loss))
+
+**(11) Ratio** ▹ new policy over old
+
+```math
+\rho_t = \exp\big(\log\pi_\vartheta(a_t \mid s_t) - \log\pi^{\mathrm{old}}_t\big)
+```
+
+**(12) Policy objective** ▹ clipped
+
+```math
+\mathcal{L}_{\mathrm{clip}} = \mathbb{E}\big[\min\big(\rho_t \hat A_t,\ \mathrm{clip}(\rho_t, 1-\epsilon, 1+\epsilon)\,\hat A_t\big)\big]
+```
+
+**(13) Value loss and entropy** ▹ $`V^{\mathrm{clip}}_w = v_t + \mathrm{clip}(V_w - v_t,\ \pm 0.2)`$, the value kept within 0.2 of its old estimate
+
+```math
+\begin{aligned}
+\mathcal{L}_V &= c_V\,\mathbb{E}\big[(\hat R_t - V^{\mathrm{clip}}_w(s_t))^2\big] \\
+H(\pi) &= \sum_{i=1}^{30}\big(\log\sigma_i + \tfrac12\log 2\pi e\big)
+\end{aligned}
+```
+
+**(14) Total loss**
+
+```math
+\mathcal{L} = -\mathcal{L}_{\mathrm{clip}} + \mathcal{L}_V - c_H\,H(\pi)
+```
+
+**(15) Update function** ▹ gradient, norm clip, Adam step on every trainable number $`\phi = (\vartheta, w)`$
+
+```math
+\begin{aligned}
+g &= \nabla_\phi \mathcal{L} \\
+\nabla_\vartheta \mathcal{L}_{\mathrm{clip}} &= \mathbb{E}\Big[\mathbb{1}[\text{not clipped}]\ \rho_t\,\hat A_t\ \nabla_\vartheta \log\pi_\vartheta(a_t \mid s_t)\Big]
+\end{aligned}
+```
+
+```math
+\begin{aligned}
+g &\leftarrow g\cdot\min\big(1,\ 1/\lVert g\rVert\big) \\
+m &\leftarrow \beta_1 m + (1-\beta_1)\,g \qquad u \leftarrow \beta_2 u + (1-\beta_2)\,g \odot g
+\end{aligned}
+```
+
+```math
+\begin{aligned}
+&\phi \leftarrow \phi - \mathrm{lr}\ \frac{m/(1-\beta_1^{\,n})}{\sqrt{u/(1-\beta_2^{\,n})} + 10^{-8}} \\
+&\beta_1 = 0.9,\ \ \beta_2 = 0.999,\ \ n = \text{update count}
+\end{aligned}
+```
+
+**(ii) Learning rate** ▹ side step, optimizer-internal, once per epoch; $`\overline{\mathrm{KL}}`$ is the mean of $`\rho_t - 1 - \log\rho_t`$ over the epoch
+
+```math
+\begin{aligned}
+&\mathrm{lr} \leftarrow \mathrm{lr} / 1.5 \quad \text{if}\ \overline{\mathrm{KL}} > 0.02 \\
+&\mathrm{lr} \leftarrow 1.5\,\mathrm{lr} \quad \text{if}\ \overline{\mathrm{KL}} < 0.005
+\end{aligned}
+```
+
+**(16) Discard** ▹ once per iteration, after all epochs: the buffer came from the old policy, so it is dropped, and the loop returns to (1)
+
+```math
+\begin{aligned}
+&\text{buffer} \leftarrow \emptyset \qquad \vartheta_{\mathrm{old}} \leftarrow \vartheta \\
+&\text{repeat (1)–(16) until 16 000 steps per rider have run}
+\end{aligned}
+```
+
+**(17) Deterministic policy** ▹ after the last iteration, at evaluation: the noise is off and the curriculum is fixed at $`\ell = 1`$
+
+```math
+a_t = \mu_\vartheta(s_t)
+```
+
+## 7. Evaluation (`playground/snowboard/play.py`)
 
 A deterministic policy (mean action) rides fixed runs: trail center, straight down, 100 m long, no recorded-state
 starts, and the edge command held at the level training ended on (`edge_cmd_level_init=1`, `edge_cmd_level_fixed`).
@@ -652,7 +875,7 @@ pelvis height per step).
 | `scripts/jitter_probe.py` | Which joints shake: velocity and step-to-step velocity change per joint, action change per step |
 | `scripts/grab_probe.py` | How close each inside hand gets to its grab point, per turn side |
 
-## 7. Results
+## 8. Results
 
 ### Stage 3 (`saved/03_stage3_centred`)
 
