@@ -357,9 +357,41 @@ $$\mathcal{L}_V = c_v\ \mathbb{E}\Big[\big(\hat R_t - V_{\mathrm{clip}}(s_t)\big
 
 $$H(\pi) = \sum_{i=1}^{30} \left(\log\sigma_i + \tfrac12\log 2\pi e\right) \qquad \mathcal{L} = -\mathcal{L}_{\mathrm{clip}} + \mathcal{L}_V - c_H\,H(\pi) \qquad c_H = 0.003$$
 
-The policy is a diagonal Gaussian over the 30 actions, $a \sim \mathcal{N}\big(\mu_\theta(s),\ \mathrm{diag}\,\sigma^2\big)$, with a
-learned $\log\sigma$ per action. Observations and value targets pass through a running mean and standard deviation. The
-gradient norm is clipped at 1.0.
+The policy is a diagonal Gaussian over the 30 actions, $a \sim \mathcal{N}\big(\mu_\theta(s),\ \mathrm{diag}\,\sigma^2\big)$.
+Observations and value targets pass through a running mean and standard deviation. The gradient norm is clipped at 1.0.
+
+### How the exploration noise σ is learned
+
+The two parts of the Gaussian are learned differently:
+
+| | Mean $\mu_\theta(s)$ | Std $\sigma$ |
+|---|---|---|
+| What it is | The MLP: 140 → 512 → 256 → 128 → 30 | One vector of 30 trainable numbers, $\log\sigma$ |
+| Depends on the observation? | Yes: a different $\mu$ per state | No: the same 30 values in every state |
+| How it changes | Gradient descent on the weights | Gradient descent directly on the 30 numbers |
+
+So σ is not a network: it is "how much to wiggle each action" (one number per action), while the MLP decides "which way
+to push each action". It starts at $\log\sigma = -1$ ($\sigma \approx 0.37$) and is capped at $-0.3$ ($\sigma \le 0.74$).
+
+The gradient that moves it comes from the log-probability of a sampled action. With $z_i = (a_i - \mu_i)/\sigma_i$, the
+number of σ the sample landed from the mean,
+
+$$\frac{\partial \log\pi(a)}{\partial \log\sigma_i} = z_i^2 - 1$$
+
+and the policy-gradient term is about $\hat A_t\,(z_i^2 - 1)$:
+
+| Sample | Advantage | Effect on $\sigma_i$ |
+|---|---|---|
+| Far from the mean ($\lvert z\rvert > 1$) | positive | **grows**: wider noise found something good |
+| Far from the mean | negative | **shrinks**: the wide excursion hurt |
+| Near the mean ($\lvert z\rvert < 1$) | positive | **shrinks**: staying close paid off |
+| Near the mean | negative | grows |
+
+Averaged over the 98k samples of an update, $\sigma_i$ grows if big deviations tend to beat the average and shrinks if
+they tend to lose. The entropy bonus adds a constant push upward ($\partial H / \partial\log\sigma_i = 1$, times
+0.003) so σ does not collapse early. Adam steps
+$\log\sigma$ together with the network weights, and samples whose ratio is already outside the clip range add no
+gradient.
 
 ### One update
 
