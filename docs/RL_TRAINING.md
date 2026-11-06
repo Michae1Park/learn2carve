@@ -55,30 +55,107 @@ running edge error is below 12° and falls above 24°. The policy sees the comma
 
 ## 2. Stages
 
-Each stage learns a different thing, but the difference lies in the **task setup** (start, edge command, slope), not
-the reward: all track the edge command with the same terms. Stage 2 learns the switch move, stage 3 uses it to ride
-the course, stage 4 tightens the turns.
+The reward is one set of terms for the whole project (§4): the stages differ in the **task the env sets up** (start
+state, edge command, slope), and each is warm-started from the last. The order came from what failed: the rider
+must first learn to *switch* edges, then to ride a course on switching, then to turn tighter.
 
-| | **Stage 2: change edges** | **Stage 3: full S** | **Stage 4: tighter turns** |
-|---|---|---|---|
-| Learns | Get from one edge to the other without falling | Link turns into an S that stays on the piste | End each turn sooner, without the overshoot |
-| Start | Already in a carve, balanced on an edge (80% toe), 4–5.5 m/s; 50% from recorded toe-carve states | Riding flat, heading within ±20° of the fall line, 4–5.5 m/s; 30% from recorded states | As stage 3 |
-| Edge command | **Timed**: heel ↔ toe, period $T$ 6 → 4 s | **Heading**: switch at 50° across the hill, centring shift up to 25° | Heading at **40°**, centring shift up to 10° |
-| Edge angle | ±15 → 30° | ±25 → 45° | As stage 3 |
-| Slope, episode | 7°, 10 s | 9°, 20 s | As stage 3 |
-| Speed | Starts 4–5.5 m/s | Free (eval mean 7.9 m/s): the steeper slope reaches the speed a 40°+ edge needs | As stage 3 |
-| Reward | Hand grab weight 5, Gaussian | Hand grab weight 10, linear (§4) | As stage 3 |
-| Saved run | `saved/01_stage2_switches` | `saved/03_stage3_centred` | `saved/04_stage3_tighter` |
+| | **Stage 1: hold a carve** | **Stage 2: change edges** | **Stage 3: full S** | **Stage 4: tighter turns** |
+|---|---|---|---|---|
+| Learns | Balance on one edge | Get from one edge to the other without falling | Link turns into an S that stays on the piste | End each turn sooner, without the overshoot |
+| Start | In a carve | In a carve (80% toe), 4–5.5 m/s; 50% from recorded toe-carve states | Riding flat, ±20° of the fall line, 4–5.5 m/s; 30% from recorded states | As stage 3 |
+| Edge command | One fixed side, at the balanced edge | **Timed**: heel ↔ toe, period $T$ 6 → 4 s | **Heading**: switch at 50° across the hill, centring up to 25° | Switch at **40°**, centring up to 10° |
+| Edge angle | Balanced edge | ±15 → 30° | ±25 → 45° | As stage 3 |
+| Slope, episode | | 7°, 10 s | 9°, 20 s | As stage 3 |
+| Reward | | Hand grab weight 5, Gaussian | Hand grab weight 10, linear (§4) | As stage 3 |
+| Saved run | none (dropped) | `saved/01_stage2_switches` | `saved/03_stage3_centred` | `saved/04_stage3_tighter` |
 
-**No hold-only stage.** An earlier stage 1 trained only to hold a carve; stage 2 warm-started from it never learned
-to change edges (it kept holding the edge stage 1 taught). Stage 2 from scratch learns the hold anyway, because its
-episodes start in a carve. The demo runs stage 2 from scratch, continues it, then warm-starts stage 3 from it, and
-stage 4 from stage 3.
+### Stage 1: hold a carve (dropped)
 
-**Recorded-state starts** (`rsi_frac`). During training the env records rider states from more than 3 s into an
-episode on the toe edge (the low, bowed carve where the switch to the heel is hardest) and restarts a share of
-episodes from them, with the command at the toe peak. Without them every episode started tall, the only pose the
-policy had learned to switch from.
+The first attempt only asked the rider to balance on one edge: the command was a fixed side at the edge that balances
+the current speed ($\sin\theta = v^2 / g\cos\alpha R_{sc}$, §1). Holding worked, but it was a **local optimum**. The
+policy that held one edge never needed to leave it, so when stage 2 was warm-started from it, it kept holding the edge
+stage 1 had taught and never learned to change edges. Stage 2 from scratch learns the hold anyway, because its episodes
+start in a carve, so stage 1 was removed.
+
+### Stage 2: learn to switch
+
+**Goal.** Get from the toe edge to the heel edge and back without falling. Nothing about the course yet.
+
+**The command is a clock.** The target edge follows a trapezoid wave, heel ↔ toe, with amplitude $A$, period $T$ and a
+random phase $\varphi$ (§1). It holds the peak for about 60% of each half-period and crosses flat in the rest, so a
+switch takes roughly 0.8 to 1.1 s. The policy sees the command now, +0.3 s and +0.6 s, so it can start a switch
+before it is due.
+
+**The reward is the tracking error against that clock.** Your guess is right: each step the env computes
+$e = \theta - \theta^\ast(t)$, where $\theta^\ast$ changes sign on the timer, and pays $e^{-(e/30°)^2}$. Three more
+terms stop the policy from collecting that reward the cheap way:
+
+| Term | What it prevents |
+|---|---|
+| Edge side (+1 / −1) | Staying on the old edge: starting the switch pays before the angle matches, because $\sigma$ = 30° alone paid nothing for crossing flat |
+| Edge command × "edged" gate | Riding flat: a flat board never scores |
+| Rise | Crouching through the change: pay for pelvis height while the command is near flat |
+
+**Start state.** The rider starts already balanced on an edge (80% on the toe edge), with the command phased to that
+side's peak, so the first seconds are a hold and the first switch comes when the clock turns. After 3 s, toe-carve
+states are recorded and 50% of episodes restart from them ("recorded-state starts" below).
+
+**Curriculum.** Amplitude $A$ 15 → 30° and period $T$ 6 → 4 s. The level rises while the running edge error stays
+below 12° and falls above 24°. The speed is only 4–5.5 m/s here, which balances about 20°, so asking for more would
+be asking for a fall (the ±50° run: 75% of falls were "lying").
+
+**Result.** Falls 8%, episodes 9.2 of 10 s, edge error 18°. Eval: toe → heel → toe → heel → toe → heel in one 11.6 s
+run. From a low toe carve the policy reaches the heel 75% of the time with 0% falls.
+
+### Stage 3: ride a course
+
+**Why the clock isn't enough.** A timed S ignores where the board is: turns stop short of 50° or drift into a fence
+(the "edge change on a timer" lesson). The fix is to **make the command a function of the path**, so the S is built from
+turns that actually completed.
+
+**The command is a small state machine.** The env holds one edge at $\pm A$ until the travel direction $\psi$ has swung
+past a switch heading, then ramps from wherever the command is to the other edge over 0.6 s:
+
+$$\theta^\ast = \theta_{\mathrm{from}} + (\pm A - \theta_{\mathrm{from}})\ \mathrm{clip}\left(\frac{t_{\mathrm{since\ switch}}}{0.6\ \mathrm{s}},\ 0,\ 1\right)$$
+
+The switch is allowed after 1 s on an edge and forced after 4 s. The reward is unchanged: it still pays
+$e^{-(e/30°)^2}$ on $e = \theta - \theta^\ast$, but now *when* $\theta^\ast$ flips depends on the board's own turn.
+
+**Start and slope.** The rider starts flat, heading within ±20° of the fall line, at 4–5.5 m/s. The slope goes from 7°
+to 9° and episodes from 10 to 20 s: the targets reach ±45°, and a 45° edge only balances above ~7 m/s, so the rider has
+to be allowed to accelerate (eval mean 7.9 m/s). Speed is never rewarded; the steeper slope provides it.
+
+**Two iterations.**
+
+| Version | Command | Result |
+|---|---|---|
+| Heading | Switch at 50° across the hill, or after 3 s | Turns rarely reached 50° in time, so edges changed on the 3 s backstop. Training: 2% falls, 9% fence. Eval: 3 falls and 7 fence exits in 11 runs |
+| **Centred** | The switch heading moves 2° per metre off the piste centre (capped at 25°), 4 s backstop. The turn back toward the centre runs longer, the one away from it ends sooner | Training: 0% falls, 2% fence, edge error 5° at ±45°. Eval: 5 of 5 runs finish the 100 m course |
+
+**Reward change.** The inside-hand grab went from a Gaussian at weight 5 to a linear fall-off at weight 10. With the
+Gaussian, the toe-turn hand sat 0.9 m from its target and felt no pull; after the change the hands came to 0.45 m
+(heel turn) and 0.63 m (toe turn) in training.
+
+**Warm start.** From the stage 2 policy: the switch it learned on a clock is reused, and the heading rule only changes
+when the switch happens.
+
+### Stage 4: tighter turns
+
+**Diagnosis.** In the stage 3 eval the heading at the switch reached 56–91° across the hill, though 50° was the target.
+The command flips only *after* $\psi$ passes the switch heading, and the board keeps swinging while the command ramps
+through flat for 0.6 s.
+
+**Change.** Two numbers, no new reward and no new start: switch at **40°** instead of 50°, and cap the centring shift at
+10° (a 25° shift would move the switch heading far from 40°). Warm-started from stage 3.
+
+**Result.** Mean heading 35–39° (stage 3: 38–42°, with switches overshooting to 91°), 4–5 turns per 100 m (stage 3: 3–4),
+same edge angles and speed, no flat cross-hill segments.
+
+### Recorded-state starts
+
+`rsi_frac`. During training the env records rider states from more than 3 s into an episode on the toe edge (the low,
+bowed carve where the switch to the heel is hardest) and restarts a share of episodes from them, with the command at the
+toe peak. Without them every episode started tall, the only pose the policy had learned to switch from.
 
 ## 3. MDP
 
