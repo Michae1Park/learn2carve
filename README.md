@@ -83,6 +83,6 @@ scripts/py playground/snowboard/play.py saved/03_stage3_centred
 scripts/py playground/snowboard/play.py saved/03_stage3_centred --livestream 2 --follow
 
 # Train: stage 2 from scratch, then stage 3 warm-started from it
-scripts/train_stage2_transition.sh
-scripts/train_stage3_full_s.sh --init_from logs/playground/snowboard/<stage 2 run>
+scripts/py playground/snowboard/train.py --stage stage2
+scripts/py playground/snowboard/train.py --stage stage3 --init_from logs/playground/snowboard/<stage 2 run>
 ```

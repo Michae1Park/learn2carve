@@ -9,13 +9,15 @@ motion data. SI units; angles in ° unless marked rad.
 
 | Settings | Where | Override |
 |---|---|---|
-| Physical facts: rider size, stance, board, snow | `envs/physical.yaml` (stance pose: `envs/assets/stances/`) | edit the file |
-| Rider options, the same in every stage | `SnowboardEnvCfg` defaults in `playground/snowboard/env.py` ([humanoid model §6](HUMANOID_MODEL.md#6-rider-options-carveenvcfg-flags---set)) | `--set key=value` |
-| Task: slope, starts, edge command | `scripts/train_stage*.sh`, the only settings that differ between stages | `--set key=value` |
-| Reward weights and term shapes | `playground/snowboard/rewards/stage2.yaml`, `stage3.yaml` (fields of `RewardsCfg`) | `--rewards FILE`, `--set rewards.key=value` |
-| PPO | `playground/snowboard/ppo.yaml` | edit the file |
+| File | Holds |
+|---|---|
+| `envs/physical.yaml` | Physical facts: rider size, stance, board, snow (stance pose: `envs/assets/stances/`) |
+| **`playground/snowboard/env.yaml`** | **Every training knob with its default and a comment:** hill, starts, falls, edge command, curriculum, recorded-state starts, rider options, actions, reward. The defaults are the stage 3 setup |
+| `playground/snowboard/stages/stage2.yaml`, `stage3.yaml`, `stage4.yaml` | Only what each stage changes from `env.yaml` |
+| `playground/snowboard/ppo.yaml` | PPO |
 
-A run's `run.yaml` records its rewards and overrides; `play.py` and the diagnostics replay them.
+Train a stage with `train.py --stage stage2`; `--set key=value` changes an `env.yaml` key for one run. A run's
+`run.yaml` records the full settings, so `play.py` and the diagnostics replay it as trained.
 
 ## 1. The task: follow the edge command
 
@@ -66,14 +68,14 @@ the course, stage 4 tightens the turns.
 
 | | **Stage 2: change edges** | **Stage 3: full S** | **Stage 4: tighter turns** |
 |---|---|---|---|
-| Script | `train_stage2_transition.sh` (from scratch) | `train_stage3_full_s.sh` (warm-started from stage 2) | Stage 3 script with `--set edge_cmd_heading_deg=40 edge_cmd_center_max_deg=10` (warm-started from stage 3, §7) |
+| Stage file | `stages/stage2.yaml` (from scratch) | `stages/stage3.yaml`: the `env.yaml` defaults (warm-started from stage 2) | `stages/stage4.yaml` (warm-started from stage 3) |
 | Learns | Get from one edge to the other without falling | Link turns into an S that stays on the piste | End each turn sooner, without the overshoot |
 | Start | Already in a carve, balanced on an edge (80% toe), 4–5.5 m/s; 50% from recorded toe-carve states | Riding flat, heading within ±20° of the fall line, 4–5.5 m/s; 30% from recorded states | As stage 3 |
 | Edge command | **Timed**: heel ↔ toe, period $T$ 6 → 4 s | **Heading**: switch at 50° across the hill, centring shift up to 25° | Heading at **40°**, centring shift up to 10° |
 | Edge angle | ±15 → 30° | ±25 → 45° | As stage 3 |
 | Slope, episode | 7°, 10 s | 9°, 20 s | As stage 3 |
 | Speed | Starts 4–5.5 m/s | Free (eval mean 7.9 m/s): the steeper slope reaches the speed a 40°+ edge needs | As stage 3 |
-| Reward | `rewards/stage2.yaml` | `rewards/stage3.yaml`: the same, except the hand grab (weight 10 instead of 5, linear instead of Gaussian) | As stage 3 |
+| Reward | Hand grab weight 5, Gaussian | `env.yaml` → `rewards` (grab weight 10, linear) | As stage 3 |
 | Saved run | `saved/01_stage2_switches` | `saved/03_stage3_centred` | `saved/04_stage3_tighter` |
 
 **No hold-only stage.** An earlier stage 1 trained only to hold a carve; stage 2 warm-started from it never learned
@@ -108,9 +110,9 @@ Each step, with $\Delta t = 1/30$ s and the edge error $e = \theta - \theta^\ast
 
 $$r = \Delta t \sum_i w_i r_i + w_{\mathrm{fall}}\ \mathbb{1}[\text{fall or fence}]$$
 
-Weights $w_i$ are those of stage 3 (`rewards/stage3.yaml`); each field is a `RewardsCfg` entry.
+Weights $w_i$ are those of stage 3, from `env.yaml` → `rewards`; the field names are the keys there.
 
-| Term (`RewardsCfg` field) | $r_i$ | $w_i$ |
+| Term (`env.yaml` key) | $r_i$ | $w_i$ |
 |---|---|---|
 | **Edge command** (`edge_cmd`) | $e^{-(e/\sigma)^2}$, $\sigma$ = 30°, × 0 while the board is flat (edge < 10°, full from 20°): a flat board never pays | 30 |
 | **Edge side** (`edge_side`) | +1 on the commanded side, −1 on the other (command > 10°, edge > 3°): starting the switch pays before the angle matches | 20 |
@@ -201,10 +203,10 @@ briefly through each edge change.
 
 The overshoot is the heading switch firing late: the edge command only flips once $\psi$ passes the switch heading,
 and the board keeps swinging while the command ramps through flat. Switching earlier ends the turn nearer the target.
-Stage 4 does this on top of the stage 3 script, warm-started from stage 3:
+Stage 4 (`stages/stage4.yaml`) does this, warm-started from stage 3:
 
 ```bash
-scripts/train_stage3_full_s.sh --init_from saved/03_stage3_centred --set edge_cmd_heading_deg=40 edge_cmd_center_max_deg=10
+scripts/py playground/snowboard/train.py --stage stage4 --init_from saved/03_stage3_centred
 ```
 
 | Setting | Stage 3 | Stage 4 | Effect |
