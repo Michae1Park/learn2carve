@@ -34,6 +34,9 @@ parser.add_argument("--pitch", type=float, default=0.0, help="pelvis hinged forw
 parser.add_argument("--twist", type=float, default=0.0, help="torso twist abdomen_z [rad]: opens the chest toward the nose")
 parser.add_argument("--to_height", action="store_true", help="scale the humanoid to envs/physical.yaml's rider height")
 parser.add_argument("--stance_width", type=float, default=None, help="binding centre to centre [m]; default envs/physical.yaml")
+parser.add_argument("--robot", choices=["amp", "g1"], default="amp",
+                    help="g1: stock Unitree G1 with envs/physical_g1.yaml (use --tag g1)")
+parser.add_argument("--settle_kp", type=float, default=30.0, help="g1: joint stiffness while settling [N·m/rad]")
 parser.add_argument("--tag", default="", help="write a stance variant, e.g. squat: stance[_<front>_<back>]_<tag>.yaml")
 add_launcher_args(parser)
 args = parser.parse_args()
@@ -50,6 +53,10 @@ from envs import physical
 # initial guess: bent knees, flexed hips, feet turned toward the nose
 GUESS = {".*_knee": args.knee, ".*_hip_y": args.hip_y, ".*_ankle_y": args.ankle_y, "left_hip_z": 0.38,
          "right_hip_z": 0.12, "abdomen_z": args.twist}
+if args.robot == "g1":
+    from envs import physical as _physical
+
+    _physical.select("g1")
 if args.guess_from is not None:
     import yaml as _yaml
 
@@ -79,6 +86,19 @@ def main():
 
         from envs.rider import binding_frames, foot_sole, rider_cfg, rider_scale
 
+        # body names: AMP, or the G1's links
+        feet, shins, torso_name, top = {"left_foot": "left_foot", "right_foot": "right_foot"}, \
+            {"left": "left_shin", "right": "right_shin"}, "torso", ("head",)
+        if args.robot == "g1":
+            from isaaclab.actuators import ImplicitActuatorCfg
+
+            from envs import rider_g1
+
+            rider_cfg, feet, shins, torso_name, top = (rider_g1.rider_cfg, rider_g1.FEET, rider_g1.SHINS,
+                                                       rider_g1.TORSO, rider_g1.SHOULDERS)
+            if args.guess_from is None:
+                global GUESS
+                GUESS = rider_g1.stance_guess(args.knee, args.hip_y, args.ankle_y, args.twist, angles, args.open_deg)
         scale = rider_scale() if args.to_height else 1.0
         width = {"stance_width": args.stance_width} if args.stance_width else {}
 
@@ -92,9 +112,17 @@ def main():
             init_state=robot_cfg.init_state.replace(pos=pelvis_pos, rot=pelvis_quat, joint_pos=GUESS),
         )
         # soft drives while settling, so the joints yield to the binding constraints instead of fighting them
-        robot_cfg.actuators["body"] = robot_cfg.actuators["body"].replace(stiffness=30.0, damping=10.0)
+        if args.robot == "g1":
+            robot_cfg = robot_cfg.replace(soft_joint_pos_limit_factor=1.0, actuators={"body": ImplicitActuatorCfg(
+                joint_names_expr=[".*"], stiffness=args.settle_kp, damping=args.settle_kp / 10, armature=0.03)})
+        else:
+            robot_cfg.actuators["body"] = robot_cfg.actuators["body"].replace(stiffness=30.0, damping=10.0)
         robot = Articulation(robot_cfg)
         sim.reset()
+        if args.robot == "g1":  # the init state is not in the sim until written: start the settle from the guess
+            robot.write_root_pose_to_sim_index(root_pose=robot.data.default_root_pose.torch.clone())
+            robot.write_joint_position_to_sim_index(position=robot.data.default_joint_pos.torch.clone())
+            robot.write_joint_velocity_to_sim_index(velocity=torch.zeros_like(robot.data.default_joint_pos.torch))
         print("[stance] bodies:", robot.data.body_names)
         print("[stance] joints:", robot.data.joint_names)
         print("[stance] total mass: %.2f kg" % robot.data.body_mass.torch[0].sum().item())
@@ -115,9 +143,9 @@ def main():
 
         # binding residual: foot sole frame vs. its binding frame on the board
         frames = binding_frames(board, cfg["rider"] | ({"binding_angles_deg": list(angles)} if angles else {}) | width)
-        sole = torch.tensor(foot_sole(scale), device=pos.device)
+        sole = torch.tensor(rider_g1.FOOT_SOLE if args.robot == "g1" else foot_sole(scale), device=pos.device)
         for foot, (bind_pos, bind_rot) in frames.items():
-            f = names.index(foot)
+            f = names.index(feet[foot])
             sole_w = pos[f] + quat_apply(quat[f], sole)
             bind_w = bp + quat_apply(bq, torch.tensor(bind_pos, device=pos.device))
             w, x, y, z = bind_rot  # wxyz -> xyzw
@@ -139,17 +167,18 @@ def main():
         up = torch.tensor([0.0, 0.0, 1.0], device=pos.device)
         parts = []
         for side in ("right", "left"):
-            foot_dir = flat(quat_apply(quat[names.index(f"{side}_foot")], torch.tensor([1.0, 0.0, 0.0], device=pos.device)))
-            knee_fwd = ((pos[names.index(f"{side}_shin")] - pos[names.index(f"{side}_foot")]) * foot_dir).sum().item()
+            foot = names.index(feet[f"{side}_foot"])
+            foot_dir = flat(quat_apply(quat[foot], torch.tensor([1.0, 0.0, 0.0], device=pos.device)))
+            knee_fwd = ((pos[names.index(shins[side])] - pos[foot]) * foot_dir).sum().item()
             parts.append(f"{side} knee_fwd {knee_fwd:+.2f} m")
-        feet_mid = (pos[names.index("right_foot")] + pos[names.index("left_foot")]) / 2
+        rf, lf = pos[names.index(feet["right_foot"])], pos[names.index(feet["left_foot"])]
+        feet_mid = (rf + lf) / 2
         parts.append(f"hip_back {((pos[pi_] - feet_mid) * fwd).sum().item():+.2f} m")
-        torso_v = pos[names.index("head")] - pos[pi_]
+        torso_v = sum(pos[names.index(n)] for n in top) / len(top) - pos[pi_]
         parts.append(f"lean {math.degrees(math.atan2((torso_v * fwd).sum().item(), torso_v[2].item())):+.0f} deg")
-        chest = flat(quat_apply(quat[names.index("torso")], torch.tensor([1.0, 0.0, 0.0], device=pos.device)))
+        chest = flat(quat_apply(quat[names.index(torso_name)], torch.tensor([1.0, 0.0, 0.0], device=pos.device)))
         nose = flat(quat_apply(bq, torch.tensor([1.0, 0.0, 0.0], device=pos.device)))
         cyaw = math.degrees(math.atan2(torch.cross(nose, chest, dim=-1)[2].item(), (nose * chest).sum().item()))
-        rf, lf = pos[names.index("right_foot")], pos[names.index("left_foot")]
         t_ = flat(rf - lf)
         mass = robot.data.body_mass.torch[0]
         keep = [i for i, n in enumerate(names) if not n.startswith("board")]

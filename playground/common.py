@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CFG_DIR = ROOT / "playground/snowboard"
 ENV_YAML = CFG_DIR / "env.yaml"
 STAGE_DIR = CFG_DIR / "stages"
+ROBOT_DIR = CFG_DIR / "robots"
 LOG_ROOT = ROOT / "logs/playground/snowboard"
 DEFAULT_CHECKPOINT = "best_agent.pt"
 sys.path.insert(0, str(ROOT))
@@ -104,7 +105,8 @@ def save_world(run_dir: Path, cfg):
     from envs import physical
     from envs.carve_env import configured_binding_angles, stance_file
 
-    shutil.copy(physical.PHYSICAL_YAML, run_dir / "physical.yaml")
+    physical.select(cfg.robot)
+    shutil.copy(physical.active_path(), run_dir / "physical.yaml")
     shutil.copy(stance_file(configured_binding_angles(cfg), cfg.stance_tag), run_dir)
 
 
@@ -117,11 +119,15 @@ def load_run(run_dir: Path) -> dict:
 
 
 def run_settings(stage: str | None, pairs: list[str]) -> dict:
-    """What a run.yaml records: env.yaml, then the stage file, then --set; complete, so a replay needs no env.yaml."""
+    """What a run.yaml records: env.yaml, the robot's file (robots/<robot>.yaml, robot=g1), the stage file, then --set;
+    complete, so a replay needs no env.yaml."""
     base = read_settings(ENV_YAML)
     changes = read_settings(stage_file(stage)) if stage else {"env": {}, "rewards": {}}
-    return {"stage": stage, "rewards": base["rewards"] | changes["rewards"],
-            "overrides": base["env"] | changes["env"] | parse_overrides(pairs)}
+    sets = parse_overrides(pairs)
+    robot = sets.get("robot", changes["env"].get("robot", base["env"].get("robot", "amp")))
+    own = read_settings(ROBOT_DIR / f"{robot}.yaml") if robot != "amp" else {"env": {}, "rewards": {}}
+    return {"stage": stage, "rewards": base["rewards"] | own["rewards"] | changes["rewards"],
+            "overrides": base["env"] | own["env"] | changes["env"] | sets}
 
 
 def run_overrides(run: dict) -> dict:

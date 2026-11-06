@@ -1,0 +1,20 @@
+# Stock Unitree G1 rider (envs/rider_g1.py): train.py --set robot=g1 [--stage ...]. Applied on top of env.yaml,
+# under the stage file and --set. The robot is not modified, so every AMP edit is off; physical facts (board,
+# stance width, binding angles) come from envs/physical_g1.yaml.
+
+env:
+  robot: g1
+  stance_tag: g1                # envs/assets/stances/stance_<front>_<back>_g1.yaml
+  rider_to_height: false
+  pelvis_mass_frac: null
+  knee_rotation: false
+  passive_joints: [_hand_, wrist]   # Dex3 fingers and wrists held at the stance by their drives
+  ankle_range_deg: {}
+  torso_twist_deg: 0
+  arm_stiffness_scale: 1.0
+  stiff_boots: false
+  boot_range_deg: {}
+  # edge synergy, + = toe edge: shins forward (knees flex, ankles dorsiflex); lean: waist side-bend
+  synergy_edge_rad: {left_knee_joint: 0.5, right_knee_joint: 0.5, left_ankle_pitch_joint: -0.3, right_ankle_pitch_joint: -0.3}
+  synergy_lean_rad: {waist_roll_joint: 0.4}
+  synergy_toe_rad: {}
