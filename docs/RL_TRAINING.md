@@ -293,46 +293,92 @@ resets that rider on its own (2048 riders reset independently).
 How each ending enters the return (the −50 on a fall or fence, the bootstrap through a time-out) is in
 [§5](#the-training-loop-in-plain-words).
 
-### Rates: policy, physics and smoothing
+### Rates: policy and physics
 
-| Granularity | |
-|---|---|
-| **Policy rate** | **30 Hz**: one 30-number action every 1/30 s (33 ms) |
-| **Simulation rate** | **120 Hz**: PhysX runs 4 substeps per policy step with the target held fixed; the PD drives recompute torque at each one |
-| **Smoothing** | The EMA spreads a change over ~0.1 s (~3 policy steps). An edge switch of 0.8–1.1 s takes 24–33 policy steps |
+Two clocks run at once, and one is a multiple of the other: **one policy step contains 4 physics substeps.**
+
+| | Policy step | Physics substep |
+|---|---|---|
+| Rate | 30 Hz | 120 Hz (4 × 30) |
+| Length | 33.3 ms | 8.3 ms |
+| Runs per policy step | once | 4 times |
+| What happens | Read the observation, the network and sampling give an action, the action becomes a joint target $`q^\ast`$, the reward is computed | The PD drives pull each joint toward $`q^\ast`$, the snow model adds its forces, PhysX advances the bodies |
+
+Within a policy step the target $`q^\ast`$ is **held fixed**: the policy does not act again until the 4 substeps are
+done. The simulation does not stand still, though: at every substep the PD drives recompute their torques from the
+joints' current angles, and the snow model recomputes its forces from the board's current motion.
+
+The split is deliberate. A decision every 33 ms is plenty for a rider whose edge change takes 0.8–1.1 s (24–33 policy
+steps), and it keeps the network and PPO's data 4× smaller. The physics needs the finer step: stiff PD joints, contact
+and the snow model's grip spring are not stable at 33 ms.
 
 ## 4. Reward
 
-Each step, with $`\Delta t = 1/30`$ s and the edge error $`e = \theta - \theta^\ast`$:
+Each step the rider earns a weighted sum of six terms $`g_i`$, each between −1 and 1, plus a one-time penalty for falling.
+With $`\Delta t = 1/30`$ s and the weights of stage 3:
 
 ```math
-r = \Delta t \sum_i w_i r_i + w_{\mathrm{fall}}\ \mathbb{1}[\text{fall or fence}]
+r = \Delta t\Big[\,30\,g_e + 20\,g_s + 10\,g_p + 30\,g_r - 10\,g_t + 10\,g_h\Big] - 50\ \mathbb{1}[\text{fall or fence}]
 ```
 
-Weights $`w_i`$ are those of stage 3.
-
-| Term | $`r_i`$ | $`w_i`$ |
+| Term | Pays for | Weight |
 |---|---|---|
-| **Edge command** | $`e^{-(e/\sigma)^2}`$, $`\sigma`$ = 30°, × 0 while the board is flat (edge < 10°, full from 20°): a flat board never pays | 30 |
-| **Edge side** | +1 on the commanded side, −1 on the other (command > 10°, edge > 3°): starting the switch pays before the angle matches | 20 |
-| **Pose reference** | Legs lean past the edge, center of mass lean less (angulation), from the pendulum model (formula below); 0 near flat | 10 |
-| **Rise** | While the command is within 8° of flat: clip((pelvis height − 0.35 m) / 0.2 m), i.e. come up through the edge change | 30 |
-| **Tilt** | clip((torso tilt − 50°) / 20°): a bow past ~65° can't get back to the heel | −10 |
-| **Hand grab** | clip(1 − $`d`$ / 1.2 m), $`d`$ the inside hand to its grab point (below). Counter-angulation for higher edges | 10 |
-| **Fall** | Once, a fall or a fence | −50 |
+| **Edge command** $`g_e`$ | The board's edge angle $`\theta`$ close to the command $`\theta^\ast`$ | 30 |
+| **Edge side** $`g_s`$ | Being on the commanded side (toe or heel), even before the angle matches | 20 |
+| **Pose reference** $`g_p`$ | Legs and center of mass leaning the way a human carver's do (angulation) | 10 |
+| **Rise** $`g_r`$ | Standing tall while the command is near flat: coming up through the edge change | 30 |
+| **Tilt** $`g_t`$ | *Penalty* for bowing the torso too far | −10 |
+| **Hand grab** $`g_h`$ | The inside hand reaching toward the board edge, for balance | 10 |
+| **Fall** | *Penalty*, once, for a fall or crossing a fence | −50 |
 
-**Pose reference.** With $`\phi_{\mathrm{legs}}`$ and $`\phi_{\mathrm{CoM}}`$ the lean of the pelvis and of the rider's
-center of mass from the board, in its roll plane:
+### What the reward does and does not pay for
+
+- **It pays for tracking the command** (edge command and edge side: 50 of the 100 points of positive weight) **and for
+  the posture that makes a switch possible** (rise, pose reference and hand grab: 50 points).
+- **There is no bonus for staying alive.** A rider earns only by being on an edge near the command, so surviving flat
+  and upright pays nothing, and the −50 fall penalty makes the rider avoid the falls that would end its earning.
+- **There is no reward for speed.** The speed comes from the slope ([§2](#2-stages)).
+
+### The terms in detail
+
+**Edge command.** With the error $`e = \theta - \theta^\ast`$ and $`\sigma = 30°`$:
 
 ```math
-r_{\mathrm{pose}} = \exp\left(-\left(\frac{\phi_{\mathrm{legs}} - 1.15\,\theta^\ast}{15°}\right)^2\right) \exp\left(-\left(\frac{\phi_{\mathrm{CoM}} - 0.77 \cdot 1.15\,\theta^\ast}{15°}\right)^2\right)
+g_e = e^{-(e/\sigma)^2}\cdot\mathrm{ramp}\big(\lvert\theta\rvert;\ 10°,\ 20°\big)
 ```
 
-**Hand grab.** Heel turn: right hand → toe edge at the front foot. Toe turn: left hand → heel edge at the back foot
-(front and back foot as in the [bindings](BOARD_MODEL.md#3-bindings)). Stage 2 used a Gaussian,
-$`e^{-(d/0.6)^2}`$ ($`d`$ in meters), at weight 5.
+The ramp is 0 below a 10° edge and 1 above 20°, so a flat board never pays. $`\sigma`$ is wide, so crossing flat toward the
+new edge already earns something.
 
-Nothing rewards speed or staying alive: survival pays only through the terms above that it allows. Edge tracking is half of the positive weight; rise, pose reference and hand grab shape the posture that makes a switch possible.
+**Edge side.** $`g_s = \mathrm{sign}(\theta)\,\mathrm{sign}(\theta^\ast)`$: +1 on the commanded side of the board, −1 on the
+other. It applies only when $`\lvert\theta^\ast\rvert > 10°`$ and $`\lvert\theta\rvert > 3°`$, and is 0 otherwise. It makes starting a
+switch pay before the angle matches.
+
+**Pose reference.** From the pendulum model. $`\phi_{\mathrm{legs}}`$ and $`\phi_{\mathrm{CoM}}`$ are the lean of the pelvis and of
+the rider's center of mass from the board, in its roll plane; the legs should lean past the commanded edge and the center
+of mass less. It is 0 when $`\lvert\theta^\ast\rvert < 10°`$.
+
+```math
+g_p = \exp\left(-\left(\frac{\phi_{\mathrm{legs}} - 1.15\,\theta^\ast}{15°}\right)^2\right) \exp\left(-\left(\frac{\phi_{\mathrm{CoM}} - 0.77 \cdot 1.15\,\theta^\ast}{15°}\right)^2\right)
+```
+
+**Rise.** $`g_r = \mathbb{1}[\lvert\theta^\ast\rvert < 8°]\ \mathrm{clip}\big((h_{\mathrm{pelvis}} - 0.35\ \mathrm{m})/0.2\ \mathrm{m},\ 0,\ 1\big)`$:
+pelvis height above the board, but only while the command is within 8° of flat.
+
+**Tilt.** $`g_t = \mathrm{clip}\big((\text{torso tilt} - 50°)/20°,\ 0,\ 1\big)`$. A bow past about 65° can't get back to the heel edge.
+
+**Hand grab.** $`g_h = \mathrm{clip}(1 - d/1.2\ \mathrm{m},\ 0,\ 1)`$, where $`d`$ is the distance from the inside hand to its grab point on
+the board. It applies during a turn (command and edge both past 10° on the same side) and is 0 otherwise. Counter-angulation
+for higher edges.
+
+| Turn | Hand | Grab point |
+|---|---|---|
+| Heel | Right | Toe edge at the front foot |
+| Toe | Left | Heel edge at the back foot |
+
+(Front and back foot as in the [bindings](BOARD_MODEL.md#3-bindings).) Stage 2 used a Gaussian, $`e^{-(d/0.6)^2}`$, at weight 5.
+
+**Fall.** −50 once, when the rider falls or crosses a fence ([§3](#when-an-episode-ends)).
 
 **Lessons (each cost at least one run):**
 
@@ -424,21 +470,7 @@ is learned and the hyperparameters.
 
 ### Objective
 
-PPO maximizes the discounted sum of the reward of §4, $`J(\pi) = \mathbb{E}\left[\sum_t \gamma^t r_t\right]`$. With the
-weights of stage 3 and $`e = \theta - \theta^\ast`$, each step pays
-
-```math
-r_t = \Delta t\Big[\,30\,g_e + 20\,g_s + 10\,g_p + 30\,g_r - 10\,g_t + 10\,g_h\Big] - 50\ \mathbb{1}[\text{fall or fence}]
-```
-
-| | Term | |
-|---|---|---|
-| $`g_e`$ | Edge command | $`e^{-(e/30°)^2}\cdot\mathrm{ramp}(\lvert\theta\rvert;\,10°,\,20°)`$ |
-| $`g_s`$ | Edge side | $`\mathrm{sign}(\theta)\,\mathrm{sign}(\theta^\ast)`$ when $`\lvert\theta^\ast\rvert > 10°`$ and $`\lvert\theta\rvert > 3°`$, else 0 |
-| $`g_p`$ | Pose reference | the product of two Gaussians in §4, 0 when $`\lvert\theta^\ast\rvert < 10°`$ |
-| $`g_r`$ | Rise | $`\mathbb{1}[\lvert\theta^\ast\rvert < 8°]\ \mathrm{clip}\big((h_{\mathrm{pelvis}} - 0.35)/0.2,\,0,\,1\big)`$ |
-| $`g_t`$ | Tilt | $`\mathrm{clip}\big((\text{torso tilt} - 50°)/20°,\,0,\,1\big)`$ |
-| $`g_h`$ | Hand grab | $`\mathrm{clip}(1 - d/1.2\ \mathrm{m},\,0,\,1)`$ while on a heel or toe turn, else 0 |
+PPO maximizes the discounted sum of the reward $`r_t`$ of [§4](#4-reward): $`J(\pi) = \mathbb{E}\left[\sum_t \gamma^t r_t\right]`$.
 
 ### Sampling
 
