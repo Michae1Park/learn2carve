@@ -8,7 +8,8 @@ unless marked rad.
 
 ### What the rider learns, in stages
 
-Carving is too much to learn at once, so training is split into stages, each warm-started from the last. The order
+Carving is too much to learn at once, so training is split into stages: stage 2 from scratch, then each warm-started
+from the last. The order
 follows what failed when it was tried all at once.
 
 | Stage | The rider learns to | Why this order |
@@ -291,6 +292,8 @@ for higher edges.
 
 ### The training loop in plain words
 
+Here $`\theta`$ denotes the **policy parameters** (the usual RL name), not the edge angle of §1–3; [§6](#6-putting-it-all-together) renames them $`\vartheta`$.
+
 PPO maximizes the discounted sum of the reward $`r_t`$ of §3: $`J(\pi) = \mathbb{E}\left[\sum_t \gamma^t r_t\right]`$.
 It uses the same machinery as supervised learning (forward pass, loss, backprop, gradient step), with one difference:
 **there is no dataset**. The policy collects its own data by acting, and the loss is weighted by how well each action
@@ -301,7 +304,7 @@ turned out.
 | Data | Fixed, labeled | Collected by the current policy, used once, then discarded |
 | "Label" | The correct output $`y`$ | The action $`a`$ the policy itself took |
 | Weight | 1 for every example | The advantage $`\hat A`$: positive if the action beat expectations, negative if not |
-| Loss | $`-\mathbb{E}\big[\log p_\theta(y \mid x)\big]`$ | $`-\mathbb{E}\big[\hat A\,\log\pi_\theta(a \mid s)\big]`$ (clipped, see Loss below) |
+| Loss | $`-\mathbb{E}\big[\log p_\theta(y \mid x)\big]`$ | $`\approx -\mathbb{E}\big[\hat A\,\log\pi_\theta(a \mid s)\big]`$ (same gradient at $`\theta = \theta_{\mathrm{old}}`$; the real loss uses a clipped ratio, see The loss) |
 
 So PPO is a weighted cross-entropy: it raises the probability of actions that worked and lowers the rest. Each
 **iteration** has four steps.
@@ -310,17 +313,13 @@ So PPO is a weighted cross-entropy: it raises the probability of actions that wo
 48 steps. Every step is one batched forward pass (input $`2048 \times 140`$) at 30 Hz, and every rider stores a transition:
 
 ```math
-a_t \sim \pi_{\theta_{\mathrm{old}}}(\cdot \mid s_t) \qquad (s_{t+1},\ r_t,\ d_t) = \mathrm{env}(s_t, a_t) \qquad \text{stored: } \big(s_t,\ a_t,\ \log\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t),\ r_t,\ d_t,\ V(s_t)\big)
+a_t \sim \pi_{\theta_{\mathrm{old}}}(\cdot \mid s_t) \qquad (s_{t+1},\ r_t,\ d_t,\ u_t) = \mathrm{env}(s_t, a_t) \qquad \text{stored: } \big(s_t,\ a_t,\ \log\pi_{\theta_{\mathrm{old}}}(a_t \mid s_t),\ r_t,\ d_t,\ u_t,\ V(s_t)\big)
 ```
 
-The result is a buffer of $`48 \times 2048 = 98\,304`$ transitions.
+$`d_t`$ flags a fall or fence, $`u_t`$ a time-out. The result is a buffer of $`48 \times 2048 = 98\,304`$ transitions.
 
-**2. Score.** The value network $`V`$ predicts how much reward to expect from each state. Comparing that prediction with
-what happened gives each transition its advantage $`\hat A_t`$ and a regression target $`\hat R_t`$ (GAE, below):
-
-```math
-\hat A_t \approx \underbrace{r_t + \gamma V(s_{t+1})}_{\text{what happened}} - \underbrace{V(s_t)}_{\text{what was expected}}
-```
+**2. Score.** Comparing what happened with what the value network $`V`$ expected gives each transition its advantage
+$`\hat A_t`$ and a value target $`\hat R_t`$ ([GAE](#advantage-estimation-gae), below).
 
 **3. Learn (backprop).** The 98k transitions are pooled and shuffled, then split into 8 mini-batches of ~12k (random
 slices, not 8 riders). One pass over all 8 is an *epoch*; 5 epochs, reshuffled each time, make 40 gradient steps. Each
@@ -343,21 +342,58 @@ $`16\,000 / 48 \approx 333`$ iterations, about 33 million transitions.
 
 | | How often | What |
 |---|---|---|
-| Forward pass | 30 Hz, every sim step (batched over 2048 riders) | Pick the action; no gradient |
-| Backprop | 40 times per iteration, once per 48 sim steps | Update the weights on the stored buffer |
+| Forward pass | 30 Hz, every policy step (batched over 2048 riders) | Pick the action; no gradient |
+| Backprop | 40 gradient steps in one burst after every 48 policy steps | Update the weights on the stored buffer |
 
 **When an episode ends mid-buffer.** The buffer is a fixed window of 48 steps per rider and is not tied to episodes.
-Episodes last 300–600 steps (10–20 s), so a window usually shows only part of one, and a rider that ends early simply
+Episodes last up to 300 steps (10 s, stage 2) or 600 steps (20 s, stages 3–4), fewer when the rider falls, so a window usually shows only part of one, and a rider that ends early simply
 restarts and keeps filling its slots.
 
 | Event | What happens | In the advantage |
 |---|---|---|
 | **Fall or fence** | The env resets that rider on the next step | Terminal: $`d_t = 1`$, so no future reward is counted. The −50 lands here |
-| **Time-out** | Same reset | Not a failure: the future is *estimated* by the value network, $`r_t + \gamma V(s_{t+1})`$ |
+| **Time-out** | Same reset | Not a failure: the future is *estimated* by the value network, $`r_t + \gamma V(s'_{t+1})`$, with $`s'_{t+1}`$ the state before the reset |
 | **Window ends mid-episode** | The rider keeps going into the next iteration | The value network stands in for the rest of the episode, $`\gamma V(s_{t+1})`$ |
 
-The sections below give each piece in full: how the advantage steers the policy, how the actions are sampled, the
-advantage estimate, the loss, how σ is learned and the hyperparameters.
+### Sampling the actions
+
+Randomness enters the data in two places; PhysX itself is deterministic:
+
+| Source | What is drawn |
+|---|---|
+| **The policy** | Each step, $`a_t \sim \mathcal{N}(\mu_\theta(s_t), \sigma^2)`$, drawn by skrl's Gaussian policy model (a `torch.distributions.Normal` over the network's mean and the learned $`\log\sigma`$). The noise is the exploration; $`\log\pi(a_t \mid s_t)`$ is stored for the ratio $`\rho_t`$ |
+| **The env, at each reset** | Start speed (4–5.5 m/s) and heading (±20°), start edge side, the command's phase and period (±15%), the first edge side in heading mode, and with probability `rsi_frac` a recorded state |
+
+Everything between the draws is deterministic: the env clips and smooths the action into joint targets, and PhysX runs
+the 4 physics substeps of one policy step.
+
+**Raw sample, clipped by the env.** The log-probability is taken on the raw Gaussian sample, and the raw sample is what
+the rollout stores. skrl's action clipping is off, so the clamp to $`[-1, 1]`$ happens in the env and is part of the
+dynamics PPO sees, not of the policy's distribution. Past the clamp, extra noise changes nothing, which is how $`\sigma`$
+grew to ~6 before it was capped.
+
+**Batched and independent.** All 2048 riders step together in one GPU simulation and reset on their own when they fall,
+cross a fence or time out. A batch therefore mixes riders at every point of an episode (a fresh start next to a rider
+mid-switch). One rider's consecutive steps are strongly correlated, but across riders, and after the shuffle into
+mini-batches, the samples are close to independent. At evaluation the noise is switched off and the rider
+takes the mean action $`\mu_\theta(s_t)`$.
+
+### Advantage estimation (GAE)
+
+Over each 48-step rollout, with the critic $`V`$, $`\gamma = 0.995`$ and $`\lambda = 0.98`$:
+
+```math
+\delta_t = r_t + \gamma\,(1 - d_t)\,V(s'_{t+1}) - V(s_t) \qquad \hat A_t = \sum_{l \ge 0} (\gamma\lambda)^l\,\delta_{t+l} \qquad \hat R_t = \hat A_t + V(s_t)
+```
+
+$`s'_{t+1}`$ is the next state before any reset. $`d_t = 1`$ after a fall or a fence, and 0 otherwise: a time-out is
+bootstrapped through $`V(s'_{t+1})`$. The sum in $`\hat A_t`$ stops at the end of an episode (fall, fence or time-out) and
+at the end of the 48-step window, where the rest is bootstrapped with $`V`$. With a credit horizon of ~40 steps, that
+window cut matters. Advantages are normalized over the batch.
+
+$`\gamma = 0.995`$ sets how far ahead reward counts (a ~6.7 s horizon, more than one S). $`\lambda = 0.98`$ sets how far
+back the credit for a surprise is spread: $`\delta_t`$ is a one-step surprise, and $`\hat A_t`$ adds the next steps' surprises
+with weights $`(\gamma\lambda)^l`$.
 
 ### How the advantage steers the policy
 
@@ -381,48 +417,10 @@ them away. A larger $`\lvert\hat A_t\rvert`$ gives a bigger push.
 
 - **Relative, not absolute.** The baseline is $`V(s_t)`$, so an action is credited only for beating what was expected from
   that state, and failures teach as much as successes. A fall puts a large negative advantage on the actions just before
-  it: GAE spreads it back over roughly the previous second ($`1/(1-\gamma\lambda) \approx 37`$ steps).
+  it: GAE spreads it back over roughly the previous 1.3 s ($`1/(1-\gamma\lambda) \approx 40`$ steps).
 - **Bounded steps.** The clip in the Loss section limits one update: for $`\hat A_t > 0`$ the objective stops rewarding
   once the action's probability has risen by $`\epsilon = 20\%`$ ($`\rho_t > 1.2`$), and for $`\hat A_t < 0`$ once it has
   fallen by 20% ($`\rho_t < 0.8`$).
-
-### Sampling the actions
-
-PhysX does not sample anything; it is the simulator that turns each action into the next state. The randomness in the
-data comes from two places:
-
-| Source | What is drawn |
-|---|---|
-| **The policy** | Each step, $`a_t \sim \mathcal{N}(\mu_\theta(s_t), \sigma^2)`$, drawn by skrl's Gaussian policy model (a `torch.distributions.Normal` over the network's mean and the learned $`\log\sigma`$). The noise is the exploration; $`\log\pi(a_t \mid s_t)`$ is stored for the ratio $`\rho_t`$ |
-| **The env, at each reset** | Start speed (4–5.5 m/s) and heading (±20°), start edge side, the command's phase and period (±15%), the first edge side in heading mode, and with probability `rsi_frac` a recorded state |
-
-Everything between the draws is deterministic: the env clips and smooths the action into joint targets, and PhysX runs
-the 4 physics substeps of one policy step.
-
-**Raw sample, clipped by the env.** The log-probability is taken on the raw Gaussian sample, and the raw sample is what
-the rollout stores. skrl's action clipping is off, so the clamp to $`[-1, 1]`$ happens in the env and is part of the
-dynamics PPO sees, not of the policy's distribution. Past the clamp, extra noise changes nothing, which is how $`\sigma`$
-grew to ~6 before it was capped.
-
-**Batched and independent.** All 2048 riders step together in one GPU simulation and reset on their own when they fall,
-cross a fence or time out. A batch therefore mixes riders at every point of an episode (a fresh start next to a rider
-mid-switch), and the data is close to independent between steps. At evaluation the noise is switched off and the rider
-takes the mean action $`\mu_\theta(s_t)`$.
-
-### Advantage estimation (GAE)
-
-Over each 48-step rollout, with the critic $`V`$, $`\gamma = 0.995`$ and $`\lambda = 0.98`$:
-
-```math
-\delta_t = r_t + \gamma\,(1 - d_t)\,V(s_{t+1}) - V(s_t) \qquad \hat A_t = \sum_{l \ge 0} (\gamma\lambda)^l\,\delta_{t+l} \qquad \hat R_t = \hat A_t + V(s_t)
-```
-
-$`d_t = 1`$ after a fall or a fence, and 0 otherwise: a time-out is bootstrapped through $`V(s_{t+1})`$. Advantages are
-normalized over the batch. The sum in $`\hat A_t`$ stops at the end of an episode.
-
-$`\gamma = 0.995`$ sets how far ahead reward counts (a ~6.7 s horizon, more than one S). $`\lambda = 0.98`$ sets how far
-back the credit for a surprise is spread: $`\delta_t`$ is a one-step surprise, and $`\hat A_t`$ adds the next steps' surprises
-with weights $`(\gamma\lambda)^l`$.
 
 ### The loss
 
@@ -433,15 +431,15 @@ With the probability ratio $`\rho_t = \pi_\theta(a_t \mid s_t)\,/\,\pi_{\theta_{
 ```
 
 ```math
-\mathcal{L}_V = c_v\ \mathbb{E}\Big[\big(\hat R_t - V_{\mathrm{clip}}(s_t)\big)^2\Big] \qquad V_{\mathrm{clip}} = V_{\mathrm{old}} + \mathrm{clip}\big(V - V_{\mathrm{old}},\ \pm 0.2\big) \qquad c_v = 1
+\mathcal{L}_V = c_V\ \mathbb{E}\Big[\big(\hat R_t - V^{\mathrm{clip}}(s_t)\big)^2\Big] \qquad V^{\mathrm{clip}} = V_{\mathrm{old}} + \mathrm{clip}\big(V - V_{\mathrm{old}},\ \pm 0.2\big) \qquad c_V = 1
 ```
 
 ```math
-H(\pi) = \sum_{i=1}^{30} \left(\log\sigma_i + \tfrac12\log 2\pi e\right) \qquad \mathcal{L} = -\mathcal{L}_{\mathrm{clip}} + \mathcal{L}_V - c_H\,H(\pi) \qquad c_H = 0.003
+\mathcal{H}(\pi) = \sum_{i=1}^{30} \left(\log\sigma_i + \tfrac12\log 2\pi e\right) \qquad \mathcal{L} = -\mathcal{L}_{\mathrm{clip}} + \mathcal{L}_V - c_H\,\mathcal{H}(\pi) \qquad c_H = 0.003
 ```
 
 The policy is a diagonal Gaussian over the 30 actions, $`a \sim \mathcal{N}\big(\mu_\theta(s),\ \mathrm{diag}\,\sigma^2\big)`$.
-Observations and value targets pass through a running mean and standard deviation. The gradient norm is clipped at 1.0.
+Observations and value targets pass through a running mean and standard deviation, so the value clip of 0.2 is in normalized units. The gradient norm is clipped at 1.0.
 
 ### How the exploration noise σ is learned
 
@@ -475,8 +473,8 @@ and the policy-gradient term is about $`\hat A_t\,(z_i^2 - 1)`$:
 Averaged over the 98k samples of an update, $`\sigma_i`$ grows if big deviations tend to beat the average and shrinks if
 they tend to lose. The entropy bonus adds a constant push upward ($`\partial H / \partial\log\sigma_i = 1`$, times
 0.003) so σ does not collapse early. Adam steps
-$`\log\sigma`$ together with the network weights, and samples whose ratio is already outside the clip range add no
-gradient.
+$`\log\sigma`$ together with the network weights. A sample adds no gradient once its ratio is past the clip on the side
+its advantage favours ($`\hat A_t > 0`$ and $`\rho_t > 1.2`$, or $`\hat A_t < 0`$ and $`\rho_t < 0.8`$).
 
 ### Settings
 
@@ -489,15 +487,16 @@ gradient.
 | Networks | Policy and value: separate MLPs, 512-256-128, ELU |
 | Policy | Gaussian, initial std $`e^{-1}`$, capped at $`e^{-0.3}`$ (it had grown to ~6 against clipped actions) |
 | Discount, GAE | $`\gamma`$ = 0.995 (~6.7 s, more than one S), $`\lambda`$ = 0.98 |
-| Learning rate | $`10^{-3}`$, adapted after each epoch by the KL between the old and new policy: divided by 1.5 when the KL exceeds twice the 0.01 target, multiplied by 1.5 when it falls below half |
+| Learning rate | $`10^{-3}`$ at the start of stage 2 (later stages carry it over), kept in $`[10^{-6}, 10^{-2}]`$ and adapted after each epoch by the KL between the old and new policy: divided by 1.5 when the KL exceeds twice the 0.01 target, multiplied by 1.5 when it falls below half |
 | Clipping | Ratio 0.2, value 0.2, grad norm 1.0 |
 | Entropy bonus | 0.003 |
-| Warm start | Each stage starts from the previous stage's weights; the exploration noise is reset |
+| Warm start | Each stage loads the previous stage's checkpoint (weights, normalizers, optimizer state and learning rate); only the exploration noise is reset |
 
 ## 5. Stages
 
-The reward is one set of terms for the whole project (§3). The stages differ in the **task the env sets up**
-(start, edge command, slope), and each is warm-started from the last. The order came from what failed: first learn to
+The reward uses the same terms throughout (§3), except the hand grab (and stage 1's fall penalty). The stages differ in
+the **task the env sets up** (start, edge command, slope, episode length). Stage 2 trains from scratch, and each later
+stage is warm-started from the last. The order came from what failed: first learn to
 *switch* edges, then to ride a course on switching, then to turn tighter.
 
 | | **Stage 1: hold a carve** | **Stage 2: change edges** | **Stage 3: full S** | **Stage 4: tighter turns** |
@@ -518,13 +517,14 @@ The reward is one set of terms for the whole project (§3). The stages differ in
 | **Heading** | Stages 3–4 | Hold one edge at $`\pm A`$ until the turn has come round ($`\psi`$ past the switch heading), then ramp through flat to the other edge over 0.6 s. Never sooner than 1 s, never later than 4 s on one edge |
 | **Centering** | Stages 3–4 | The switch heading moves 2° per meter off the trail center (capped): the turn back toward the center runs longer, the one away from it ends sooner, so the S stays between the fences |
 
-With amplitude $`A`$, period $`T`$ and random phase $`\varphi`$, the **timed** command is
+With amplitude $`A`$, period $`T`$ and phase $`\varphi`$, the **timed** command is
 
 ```math
 \theta^\ast(t) = A \cdot \mathrm{clip}\left(1.8\,\sin\left(\frac{2\pi t}{T} + \varphi\right),\ -1,\ 1\right)
 ```
 
-and the **heading** command ramps from its value $`\theta_{\mathrm{from}}`$ at the last switch to the new edge:
+$`\varphi \in \{0, \pi\}`$ at random picks the first side; a carve start sets $`\varphi = \pm\pi/2`$, the peak of its side.
+The **heading** command ramps from its value $`\theta_{\mathrm{from}}`$ at the last switch to the new edge:
 
 ```math
 \theta^\ast = \theta_{\mathrm{from}} + (\pm A - \theta_{\mathrm{from}})\ \mathrm{clip}\left(\frac{t_{\mathrm{since\ switch}}}{0.6\ \mathrm{s}},\ 0,\ 1\right)
@@ -534,7 +534,7 @@ and the **heading** command ramps from its value $`\theta_{\mathrm{from}}`$ at t
 
 Training uses two curricula:
 
-- **Across stages**, by hand: a fixed sequence of tasks (hold → switch → S → tighter), each warm-started from the last.
+- **Across stages**, by hand: a fixed sequence of tasks (switch → S → tighter; hold was dropped), each warm-started from the last.
 - **Within a stage**, automatically: the edge command starts easy and gets harder only while the rider keeps up. This
   section is about that one.
 
@@ -558,20 +558,26 @@ The level moves according to how well the rider is tracking:
 | **Competence threshold** | The level rises while $`\bar e < 12°`$ and falls while $`\bar e > 24°`$ (twice 12°). In between it holds, a dead band so the level does not jitter |
 
 ```math
-\ell \leftarrow \mathrm{clip}\Big(\ell + \tfrac{1}{2000}\,s,\ 0,\ 1\Big) \qquad s = \begin{cases} +1 & \bar e < 12° \\ -1 & \bar e > 24° \\ 0 & \text{otherwise} \end{cases}
+\ell \leftarrow \mathrm{clip}\Big(\ell + \tfrac{1}{2000}\,\kappa,\ 0,\ 1\Big) \qquad \kappa = \begin{cases} +1 & \bar e < 12° \\ -1 & \bar e > 24° \\ 0 & \text{otherwise} \end{cases}
 ```
 
 The level moves by a fixed step of 1/2000 per policy step, so it can rise no faster than a ramp over 2000 steps (an eighth
 of a 16 000-step run), and it only rises while the rider is competent.
 
-- **One level for everyone.** All 2048 riders share it. The only randomness on top is per episode: the period ±15%, the
-  phase and the first edge side.
+- **One level for everyone.** All 2048 riders share it. The only randomness on top is per episode: the period ±15% and the
+  first edge side (the phase, in timed mode).
 - **When it applies.** The amplitude follows the level live, mid-episode. The period is drawn once per episode, at reset.
 - **Each stage restarts at level 0**, so a warm-started policy is re-eased into the harder command (stage 3 begins at ±25°,
-  not ±45°). Stage 3 finished training at level 1, the full ±45°.
+  not ±45°).
 - **Evaluation** fixes the level at 1, the hardest command.
 
-### Stage 1: hold a carve (dropped)
+### Recorded-state starts
+
+During training the env records rider states from more than 3 s into an episode, on the toe edge past 12° (the low,
+bowed carve where the switch to the heel is hardest). Once 256 are stored, a share of episodes (`rsi_frac`: 0.5 in stage
+2, 0.3 in stages 3–4) restarts from them, with the command at the toe peak. Without them every episode started tall, the only pose the policy had learned to switch from.
+
+### Stage 1 (dropped): hold a carve
 
 Every episode started in a carve, and the command held that side at the edge that balances the current speed
 ($`\sin\theta = v^2 / g\cos\alpha R_{sc}`$, §1). A held carve circles back up
@@ -583,18 +589,18 @@ learns the hold anyway, because its episodes start in a carve.
 
 - **Goal.** Get from the toe edge to the heel edge and back without falling. Nothing about the course yet.
 - **Command.** A clock (timed wave, above). It holds each peak for about 60% of a half-period and crosses flat in the
-  rest, so a switch takes roughly 0.8–1.1 s.
-- **Reward.** The error against that clock: $`e = \theta - \theta^\ast(t)`$ pays $`e^{-(e/30°)^2}`$, with $`\theta^\ast`$
-  flipping sign on the timer. Three terms close the cheap ways out:
+  rest, so a switch takes roughly 0.6–1.3 s (period 4–6 s, ±15%).
+- **Reward.** The §3 terms against that clock, $`e = \theta - \theta^\ast(t)`$, with $`\theta^\ast`$ flipping sign on the
+  timer. Three pieces close the cheap ways out:
 
-| Term | What it prevents |
+| What closes it | What it prevents |
 |---|---|
-| Edge side (+1 / −1) | Staying on the old edge: starting the switch pays before the angle matches, because σ = 30° alone paid nothing for crossing flat |
+| Edge side (+1 / −1) | Staying on the old edge: starting the switch pays before the angle matches, because the edge term's ramp pays nothing while the board is flat |
 | The "edged" gate on the edge term | Riding flat: a flat board never scores |
 | Rise | Crouching through the change: pays for pelvis height while the command is near flat |
 
-- **Start.** Balanced on an edge (80% toe), the command phased to that side's peak. After 3 s, toe-carve states are
-  recorded and 50% of episodes restart from them (see below).
+- **Start.** Balanced on an edge (80% toe), the command phased to that side's peak. 50% of episodes restart from
+  recorded toe-carve states instead ([recorded-state starts](#recorded-state-starts), above).
 - **Curriculum.** $`A`$ 15 → 30°, $`T`$ 6 → 4 s (see Curriculum, above). At 4–5.5 m/s only 13–24°
   balances, so a larger amplitude would just be a fall (the ±50° run: 75% of falls were "lying").
 - **Result.** Falls 8%, episodes 9.2 of 10 s, edge error 18°. Eval: toe → heel → toe → heel → toe → heel in one 11.6 s
@@ -618,8 +624,8 @@ Two iterations of the command:
 
 | Version | Command | Result |
 |---|---|---|
-| Heading | Switch at 50° across the hill, or after 3 s | Turns rarely reached 50° in time, so edges changed on the 3 s backstop. Training: 2% falls, 9% fence. Eval: 3 falls and 7 fence exits in 11 runs |
-| **Centered** | Adds centering (up to 25°) and a 4 s backstop | Training: 0% falls, 2% fence, edge error 5° at ±45°. Eval: 5 of 5 runs finish the 100 m course |
+| Heading only | Switch at 50° across the hill, or after 3 s | Turns rarely reached 50° in time, so edges changed on the 3 s backstop. Training: 2% falls, 9% fence. Eval: 3 falls and 7 fence exits in 11 runs |
+| **Heading + centering** | Adds centering (up to 25°) and a 4 s backstop | Training: 0% falls, 2% fence, edge error 5° at ±45° (curriculum level 1). Eval: 5 of 5 runs finish the 100 m course |
 
 ### Stage 4: tighter turns
 
@@ -628,14 +634,8 @@ Two iterations of the command:
   through flat for 0.6 s.
 - **Change.** Two numbers, no new reward and no new start: switch at **40°** instead of 50°, and cap the centering shift
   at 10°, so it doesn't move the switch heading far from 40°. Warm-started from stage 3.
-- **Result.** Mean heading 35–39° (stage 3: 38–42°, with switches overshooting to 91°), 4–5 turns per 100 m (stage 3:
+- **Result.** Mean heading across the hill 35–39° (stage 3: 38–42°, with switches overshooting to 91°), 4–5 turns per 100 m (stage 3:
   3–4), same edge angles and speed, no flat cross-hill segments.
-
-### Recorded-state starts
-
-`rsi_frac`. During training the env records rider states from more than 3 s into an episode on the toe edge (the low,
-bowed carve where the switch to the heel is hardest) and restarts a share of episodes from them, with the command at the
-toe peak. Without them every episode started tall, the only pose the policy had learned to switch from.
 
 ## 6. Putting it all together
 
@@ -643,7 +643,7 @@ The whole method as one algorithm, step by step. The equations are those of the 
 
 ### Setup
 
-**Notation.** Two different things are easy to mix up here:
+**Learned vs physical.** Two different things are easy to mix up here:
 
 | Symbol | Meaning |
 |---|---|
@@ -651,7 +651,7 @@ The whole method as one algorithm, step by step. The equations are those of the 
 | $`\vartheta`$ | The **policy parameters**: the policy MLP's weights plus the 30 numbers $`\log\sigma`$. [§4](#4-ppo) calls these $`\theta`$, the usual RL name; here that letter is taken by the edge angle |
 | $`w`$ | The **value network's weights** |
 
-Only $`\vartheta`$ and $`w`$ are learned. $`\rho_t`$ (with a time index) is the probability ratio of PPO; $`\rho^{\mathrm{edge}}_j`$ etc. (with a joint index) are the synergy vectors of [§2](#from-the-smoothed-action-to-a-joint-target).
+Only $`\vartheta`$ and $`w`$ are learned. $`\rho_t`$ (with a time index) is the probability ratio of PPO; $`\rho^{\mathrm{edge}}_j`$ etc. (with joint index $`j`$) are the synergy vectors of [§2](#from-the-smoothed-action-to-a-joint-target).
 
 | Object | Definition |
 |---|---|
@@ -662,17 +662,18 @@ Only $`\vartheta`$ and $`w`$ are learned. $`\rho_t`$ (with a time index) is the 
 | Reward | $`r_t`$ ([§3](#3-reward)) |
 | Constants | $`N = 2048`$ riders, $`H = 48`$ steps, $`K = 5`$ epochs, $`M = 8`$ mini-batches, $`\gamma = 0.995`$, $`\lambda = 0.98`$, $`\epsilon = 0.2`$, $`c_V = 1`$, $`c_H = 0.003`$, $`\Delta t = 1/30`$ s, value clip 0.2, gradient-norm clip 1, initial learning rate $`10^{-3}`$ |
 | Normalization | Observations, and the value network's targets, pass through a running mean and std; this is implicit in every $`s_t`$ and $`V_w`$ below |
+| Start distribution $`p_{\mathrm{start}}`$ | Drawn at every reset: $`\lvert\mathbf v_0\rvert \sim U[4, 5.5]`$ m/s, $`\psi_0 \sim U[-20°, 20°]`$; or, with probability $`p_{\mathrm{rec}}`$, a recorded state. Stage 2 starts balanced on an edge instead, the toe side with probability 0.8: $`\theta_0 = \pm\theta_{\mathrm{bal}}(\lvert\mathbf v_0\rvert)`$ ([§1](#1-the-edge-command-a-target-the-rider-tracks)) |
 
-**All other symbols**, in the order they appear below:
+**Everything else**, in the order it appears below:
 
 | Symbol | Meaning |
 |---|---|
-| $`t`$, $`j`$, $`i`$ | Time step (one policy step, 1/30 s), rider index ($`1..N`$), action component ($`1..30`$) |
+| $`t`$, $`k`$, $`i`$, $`j`$ | Time step (one policy step, 1/30 s), rider index ($`1..N`$), action component ($`1..30`$), joint index |
 | $`\ell \in [0, 1]`$ | **Curriculum level**: how hard the edge command is. 0 = smallest amplitude (and, for the timed command, the longest period), 1 = the stage's full command ([§5](#curriculum-how-the-difficulty-adapts)) |
 | $`\bar e`$ | Running average of the absolute edge error $`\lvert e\rvert`$ over all upright riders, in degrees; it moves $`\ell`$ |
 | $`\kappa \in \{-1, 0, +1\}`$ | Direction $`\ell`$ moves this step: up when $`\bar e`$ is small, down when large |
 | $`\mathrm{lr}`$ | Adam learning rate |
-| $`x^j_0 \sim p_{\mathrm{start}}`$ | Rider $`j`$'s start state, drawn from the start distribution (position, speed, heading below) |
+| $`x^k_0 \sim p_{\mathrm{start}}`$ | Rider $`k`$'s start state, drawn from the start distribution (position, speed, heading below) |
 | $`\lvert\mathbf v_0\rvert`$, $`\psi`$, $`y`$ | Start speed; path heading (travel direction, 0 = straight down the fall line); position across the trail |
 | $`\psi_0`$, $`U[a, b]`$ | Start heading; a value drawn uniformly at random between $`a`$ and $`b`$, so $`\psi_0 \sim U[-20°, 20°]`$ starts each rider within 20° of straight downhill |
 | $`p_{\mathrm{rec}}`$ | Share of resets that start from a recorded mid-run state instead: 0.5 in stage 2, 0.3 in stages 3–4, [§5](#recorded-state-starts). Config key `rsi_frac` |
@@ -690,12 +691,12 @@ Only $`\vartheta`$ and $`w`$ are learned. $`\rho_t`$ (with a time index) is the 
 | $`d_t`$, $`u_t`$ | Episode ended by a fall or fence; episode ended by the time limit |
 | $`t_{\mathrm{ep}}, T_{\mathrm{ep}}`$ | Time since the episode started; its limit (10 s stage 2, 20 s stages 3–4) |
 | $`\log\pi^{\mathrm{old}}_t`$, $`v_t`$ | Log-probability of $`a_t`$ and value estimate, both stored at collection time |
-| $`s'_{t+1}`$ | The observation after step $`t`$, taken before any reset |
+| $`s'_{t+1}`$ | The observation after step $`t`$, taken before any reset; on a time-out skrl folds $`\gamma V_w(s'_{t+1})`$ into $`r_t`$ at collection time, otherwise it equals the next stored $`s_{t+1}`$ |
 | $`\delta_t, \hat A_t, \hat R_t`$ | TD error, advantage (how much better $`a_t`$ did than expected), value target |
 | $`\rho_t`$ | Probability ratio, new policy over old, for the stored action |
 | $`\mathcal L_{\mathrm{clip}}, \mathcal L_V, \mathcal H(\pi), \mathcal L`$ | Clipped policy objective, value loss, policy entropy, total loss |
-| $`\phi`$, $`G`$ | All learned numbers $`(\vartheta, w)`$; the gradient of $`\mathcal L`$ with respect to them |
-| $`m_1, m_2, \beta_1, \beta_2, n`$ | Adam's running mean of $`G`$ and of $`G^2`$, their decay rates, the number of updates so far |
+| $`\xi`$, $`G`$ | All learned numbers $`(\vartheta, w)`$; the gradient of $`\mathcal L`$ with respect to them |
+| $`m_1, m_2, \beta_1, \beta_2, n`$ | Adam's running mean of $`G`$ and of $`G^2`$, their decay rates (not the slip angle $`\beta`$), the number of updates so far |
 | $`\overline{\mathrm{KL}}`$ | How far the policy moved in one epoch, estimated from $`\rho_t`$ |
 
 **Goal.** $`J(\vartheta)`$ is the expected discounted reward when the rider acts with policy $`\pi_\vartheta`$. Training looks for the parameters $`\vartheta^\ast`$ that make it largest:
@@ -712,33 +713,28 @@ PPO does not solve this in one go; each iteration below takes a few gradient ste
 \begin{aligned}
 &\vartheta,\ w \leftarrow \text{previous stage's values, normalizers included (stage 2: random)} \\
 &\log\sigma \leftarrow -1 \quad (\text{reset each stage, overriding the loaded value}) \\
-&\ell \leftarrow 0 \qquad \bar e \leftarrow 90° \qquad \mathrm{lr} \leftarrow 10^{-3}
+&\mathrm{lr},\ m_1,\ m_2,\ n \leftarrow \text{previous stage's optimizer state (stage 2: } \mathrm{lr} = 10^{-3}\text{, fresh Adam)} \\
+&\ell \leftarrow 0 \qquad \bar e \leftarrow 90° \qquad \text{every rider } k:\ x^k_0 \sim p_{\mathrm{start}}
 \end{aligned}
 ```
 
-```math
-\begin{aligned}
-&\text{every rider } j:\ x^j_0 \sim p_{\mathrm{start}}, \quad \lvert\mathbf v_0\rvert \sim U[4, 5.5]\ \mathrm{m/s}, \quad \psi_0 \sim U[-20°, 20°] \\
-&\text{or, with probability } p_{\mathrm{rec}},\ \text{a recorded state}
-\end{aligned}
-```
-
-Stage 2 instead starts every rider balanced on an edge, the toe side with probability 0.8: $`\theta_0 = \pm\theta_{\mathrm{bal}}(\lvert\mathbf v_0\rvert)`$, the balanced edge of [§1](#1-the-edge-command-a-target-the-rider-tracks).
+The warm start loads the whole skrl checkpoint, optimizer included, so the learning rate continues where the KL rule
+left it and Adam keeps its moments (also those of $`\log\sigma`$, whose value alone is reset).
 
 ### Repeat for each iteration (333 per 16 000-step run)
 
 Steps $`(1), (2), \dots`$ are the main flow, in reading order. Side steps $`(\mathrm i), (\mathrm{ii})`$ tune the environment and the optimizer but are not in the data or gradient path. The italic lines say which loop the steps below them sit in.
 
-**Roadmap:** collect (1)–(8) → advantages (9)–(10) → update (11)–(15) → discard (16), repeated until training ends, then output (17).
+**Roadmap:** collect (1)–(8) → advantages (9)–(10) → update (11)–(15b) → discard (16), repeated until training ends, then output (17).
 
 *Loop over time:* for $`t = 0, \dots, H-1`$, all $`N`$ riders in parallel, steps (1)–(8)
 
-**(1) Observe** ▹ [§2](#2-mdp)
+**(1) Observe** ▹ [§2](#2-mdp); the command now and 0.3 s, 0.6 s (9, 18 steps) ahead
 
 ```math
 \begin{aligned}
 s_t = \big[\,&q,\ \dot q,\ \text{torso},\ \text{hands and feet},\ \text{board},\ \tilde a_{t-1},\ \text{task}, \\
-&\theta^\ast_t,\ \theta^\ast_{t+0.3},\ \theta^\ast_{t+0.6}\,\big] \in \mathbb{R}^{140}
+&\theta^\ast_t,\ \theta^\ast_{t+9},\ \theta^\ast_{t+18}\,\big] \in \mathbb{R}^{140}
 \end{aligned}
 ```
 
@@ -766,7 +762,7 @@ q^\ast_j = \mathrm{clip}\big(&q^{\mathrm{stance}}_j + c_j\,\tfrac12(q^{\max}_j -
 \end{aligned}
 ```
 
-**(5) Physics** ▹ 4 substeps at 120 Hz, $`q^\ast_t`$ held fixed ([snow model](SNOW_MODEL.md))
+**(5) Physics** ▹ 4 substeps at 120 Hz, $`q^\ast_t`$ held fixed; the snow model reads the board state and its load $`F_N`$ ([snow model](SNOW_MODEL.md))
 
 ```math
 \begin{aligned}
@@ -783,7 +779,7 @@ q^\ast_j = \mathrm{clip}\big(&q^{\mathrm{stance}}_j + c_j\,\tfrac12(q^{\max}_j -
 \theta^\ast_{t+1} = \mathrm{generator}(\ell,\ \psi,\ y,\ t) \qquad e_{t+1} = \theta_{t+1} - \theta^\ast_{t+1}
 ```
 
-**(7) Reward** ▹ the terms $`g`$ are those of [§3](#3-reward), evaluated with $`e_{t+1}`$ from (6)
+**(7) Reward** ▹ the terms $`g`$ are those of [§3](#3-reward), evaluated with $`e_{t+1}`$ from (6); stage 3–4 weights (stage 2's hand grab: [§5](#5-stages))
 
 ```math
 \begin{aligned}
@@ -797,7 +793,7 @@ r_t = \Delta t\big[\,&30\,g_e + 20\,g_s + 10\,g_p + 30\,g_r - 10\,g_t + 10\,g_h\
 ```math
 \begin{aligned}
 d_t &= \mathbb{1}[\text{fall or fence}] \qquad u_t = \mathbb{1}[t_{\mathrm{ep}} > T_{\mathrm{ep}}] \\
-&\text{if } d_t \lor u_t:\ \text{reset rider } j,\ x^j_0 \sim p_{\mathrm{start}}
+&\text{if } d_t \lor u_t:\ \text{reset rider } k,\ x^k_0 \sim p_{\mathrm{start}}\ (\text{recorded state with probability } p_{\mathrm{rec}})
 \end{aligned}
 ```
 
@@ -807,7 +803,7 @@ d_t &= \mathbb{1}[\text{fall or fence}] \qquad u_t = \mathbb{1}[t_{\mathrm{ep}} 
 
 ```math
 \begin{aligned}
-\bar e &\leftarrow 0.99\,\bar e + 0.01\,\mathrm{mean}_j\lvert e\rvert \quad (\text{riders still upright}) \\
+\bar e &\leftarrow 0.99\,\bar e + 0.01\,\mathrm{mean}_k\lvert e\rvert \quad (\text{riders still upright}) \\
 \ell &\leftarrow \mathrm{clip}\Big(\ell + \tfrac{1}{2000}\,\kappa,\ 0,\ 1\Big) \qquad \kappa = \begin{cases} +1 & \bar e < 12° \\ -1 & \bar e > 24° \\ 0 & \text{otherwise} \end{cases}
 \end{aligned}
 ```
@@ -830,7 +826,7 @@ d_t &= \mathbb{1}[\text{fall or fence}] \qquad u_t = \mathbb{1}[t_{\mathrm{ep}} 
 \hat A_t \leftarrow \frac{\hat A_t - \mathrm{mean}(\hat A)}{\mathrm{std}(\hat A) + 10^{-8}}
 ```
 
-*Loop over epochs and mini-batches:* for each of $`K = 5`$ epochs, for each of $`M = 8`$ shuffled mini-batches, steps (11)–(15); side step (ii) once per epoch ([§4](#the-loss))
+*Loop over epochs and mini-batches:* for each of $`K = 5`$ epochs, for each of $`M = 8`$ shuffled mini-batches, steps (11)–(15b); side step (ii) once per epoch ([§4](#the-loss))
 
 **(11) Ratio** ▹ new policy over old
 
@@ -844,7 +840,7 @@ d_t &= \mathbb{1}[\text{fall or fence}] \qquad u_t = \mathbb{1}[t_{\mathrm{ep}} 
 \mathcal{L}_{\mathrm{clip}} = \mathbb{E}\big[\min\big(\rho_t \hat A_t,\ \mathrm{clip}(\rho_t, 1-\epsilon, 1+\epsilon)\,\hat A_t\big)\big]
 ```
 
-**(13) Value loss and entropy** ▹ $`V^{\mathrm{clip}}_w = v_t + \mathrm{clip}(V_w - v_t,\ \pm 0.2)`$, the value kept within 0.2 of its old estimate
+**(13) Value loss and entropy** ▹ $`V^{\mathrm{clip}}_w = v_t + \mathrm{clip}(V_w - v_t,\ \pm 0.2)`$, the value kept within 0.2 (normalized units) of its old estimate
 
 ```math
 \begin{aligned}
@@ -859,25 +855,32 @@ d_t &= \mathbb{1}[\text{fall or fence}] \qquad u_t = \mathbb{1}[t_{\mathrm{ep}} 
 \mathcal{L} = -\mathcal{L}_{\mathrm{clip}} + \mathcal{L}_V - c_H\,\mathcal{H}(\pi)
 ```
 
-**(15) Update** ▹ gradient, norm clip, Adam step on all learned parameters together, $`\phi = (\vartheta, w)`$. The second line shows what the policy part of the gradient is: samples whose ratio is already clipped contribute nothing
+**(15a) Gradient and norm clip** ▹ on all learned parameters together, $`\xi = (\vartheta, w)`$. The second line shows what the policy part of the gradient is: a sample contributes nothing once its ratio is past the clip on the side its advantage favours
 
 ```math
 \begin{aligned}
-G &= \nabla_\phi \mathcal{L} \\
-\nabla_\vartheta \mathcal{L}_{\mathrm{clip}} &= \mathbb{E}\Big[\mathbb{1}[\text{not clipped}]\ \rho_t\,\hat A_t\ \nabla_\vartheta \log\pi_\vartheta(a_t \mid s_t)\Big]
+G &= \nabla_\xi \mathcal{L} \\
+\nabla_\vartheta \mathcal{L}_{\mathrm{clip}} &= \mathbb{E}\Big[\mathbb{1}\big[\neg(\hat A_t > 0 \land \rho_t > 1+\epsilon) \land \neg(\hat A_t < 0 \land \rho_t < 1-\epsilon)\big]\ \rho_t\,\hat A_t\ \nabla_\vartheta \log\pi_\vartheta(a_t \mid s_t)\Big]
 \end{aligned}
 ```
 
 ```math
 \begin{aligned}
-G &\leftarrow G\cdot\min\big(1,\ 1/\lVert G\rVert\big) \\
+G &\leftarrow G\cdot\min\big(1,\ 1/\lVert G\rVert\big)
+\end{aligned}
+```
+
+**(15b) Adam step**
+
+```math
+\begin{aligned}
 m_1 &\leftarrow \beta_1 m_1 + (1-\beta_1)\,G \qquad m_2 \leftarrow \beta_2 m_2 + (1-\beta_2)\,G \odot G
 \end{aligned}
 ```
 
 ```math
 \begin{aligned}
-&\phi \leftarrow \phi - \mathrm{lr}\ \frac{m_1/(1-\beta_1^{\,n})}{\sqrt{m_2/(1-\beta_2^{\,n})} + 10^{-8}} \\
+&\xi \leftarrow \xi - \mathrm{lr}\ \frac{m_1/(1-\beta_1^{\,n})}{\sqrt{m_2/(1-\beta_2^{\,n})} + 10^{-8}} \\
 &\beta_1 = 0.9,\ \ \beta_2 = 0.999,\ \ n = \text{update count}
 \end{aligned}
 ```
@@ -887,7 +890,7 @@ m_1 &\leftarrow \beta_1 m_1 + (1-\beta_1)\,G \qquad m_2 \leftarrow \beta_2 m_2 +
 ```math
 \begin{aligned}
 &\mathrm{lr} \leftarrow \mathrm{lr} / 1.5 \quad \text{if}\ \overline{\mathrm{KL}} > 0.02 \\
-&\mathrm{lr} \leftarrow 1.5\,\mathrm{lr} \quad \text{if}\ \overline{\mathrm{KL}} < 0.005
+&\mathrm{lr} \leftarrow 1.5\,\mathrm{lr} \quad \text{if}\ \overline{\mathrm{KL}} < 0.005 \qquad \mathrm{lr} \in [10^{-6},\ 10^{-2}]
 \end{aligned}
 ```
 
