@@ -215,6 +215,38 @@ toe peak. Without them every episode started tall, the only pose the policy had 
 | **Fence** | Board past ±20 m across the slope; ends the episode like a fall |
 | **Time-out** | End of the episode (stage length above) |
 
+### From observation to joint targets
+
+One policy step, end to end:
+
+![One policy step: observation, MLP, Gaussian sample, clip and smooth, joint targets, PD drives](rider/policy_path.svg)
+
+**Observation (140 numbers, all normalized by a running mean/std):**
+
+| Block | Size | Content |
+|---|---|---|
+| Joint positions, velocities | 30 + 30 | All 30 joints (28 driven + 2 passive) |
+| Torso | 1 + 6 + 3 + 3 | Height; orientation as tangent + normal vectors; linear and angular velocity |
+| Key bodies | 12 | Hands and feet relative to the root (x, y, z each) |
+| Board | 6 | $\theta$, $v_\parallel$, $v_\perp$, yaw rate, $N/mg$, grip usage |
+| Last action | 28 | The previous joint actions |
+| Task | 19 | Speed, $\psi$, $\beta$, board yaw (each as sin/cos where an angle), position between the fences, turn state, the edge command now / +0.3 s / +0.6 s, 4 unused slots |
+| Synergy state | 2 | The previous edge and lean synergy actions |
+
+**Policy output (30 numbers):** the network emits 30 means $\mu$. The standard deviations are not an output: they are
+30 learned $\log\sigma$ parameters shared by all states. Each step $a \sim \mathcal{N}(\mu, \sigma^2)$.
+
+| Action | Count | Meaning |
+|---|---|---|
+| Edge synergy $s_0$ | 1 | Ankles and knees together, +1 toward the toe edge, −1 toward the heel |
+| Lean synergy $s_1$ | 1 | Abdomen side-bend (counter-angulation) |
+| Joint residuals $a_j$ | 28 | A small offset on each driven joint (arms larger) |
+
+**To joint targets:** the sample is clipped to $[-1, 1]$ and smoothed (EMA, 0.35 on the new value). Each joint target
+is the squat stance plus its scaled residual plus the synergy contributions, clipped to the joint limits (formula and
+scales in [humanoid model §5](HUMANOID_MODEL.md#5-actions--joint-targets)). The PD drives then hold the targets for
+4 substeps at 120 Hz.
+
 The rider rides the rigid board ([board model §1](BOARD_MODEL.md#1-geometry)); the two-half board
 ([§4](BOARD_MODEL.md#4-two-half-board-opt-in-not-used-in-the-demo)) is never trained on.
 

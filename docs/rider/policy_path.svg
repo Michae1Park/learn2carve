@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>One policy step: 140 observations through the MLP to 30 means, a Gaussian sample with learned log sigma, clipped and smoothed, split into 2 synergies and 28 joint residuals, then joint targets for the PD drives</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#374151"/>
+    </marker>
+    <style>
+      .name { font-size: 18px; font-weight: 700; fill: #111827; }
+      .sub { font-size: 15px; fill: #374151; }
+      .tag { font-size: 16px; font-weight: 700; fill: #374151; }
+      .num { font-size: 16px; font-weight: 700; fill: #FFFFFF; }
+      .wire { stroke: #374151; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .band { fill: #F9FAFB; stroke: #D1D5DB; stroke-width: 1.5; stroke-dasharray: 6 5; }
+      .obs { fill: #E8F6EC; stroke: #2E9E50; stroke-width: 2; }
+      .policy { fill: #F2ECFF; stroke: #7C4DDB; stroke-width: 2; }
+      .env { fill: #FFF4E0; stroke: #D98A00; stroke-width: 2; }
+      .sim { fill: #EAF2FF; stroke: #2F6FDB; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <!-- solid card: readable in GitHub's light and dark themes -->
+  <rect x="1" y="1" width="1198" height="338" rx="16" fill="#FFFFFF" stroke="#E5E7EB" stroke-width="2"/>
+
+  <!-- bands -->
+  <rect x="212" y="30" width="388" height="296" rx="14" class="band"/>
+  <text x="228" y="58" class="tag">policy (skrl)</text>
+  <rect x="602" y="30" width="380" height="194" rx="14" class="band"/>
+  <text x="618" y="58" class="tag">env, every step</text>
+
+  <!-- 1 observation -->
+  <rect x="30" y="96" width="164" height="100" rx="12" class="obs"/>
+  <circle cx="52" cy="124" r="13" fill="#2E9E50"/><text x="52" y="130" class="num" text-anchor="middle">1</text>
+  <text x="72" y="131" class="name">Observation</text>
+  <text x="46" y="162" class="sub">140 numbers</text>
+  <text x="46" y="182" class="sub">running mean / std</text>
+
+  <!-- 2 network -->
+  <rect x="224" y="96" width="164" height="100" rx="12" class="policy"/>
+  <circle cx="246" cy="124" r="13" fill="#7C4DDB"/><text x="246" y="130" class="num" text-anchor="middle">2</text>
+  <text x="266" y="131" class="name">MLP</text>
+  <text x="240" y="162" class="sub">512-256-128, ELU</text>
+  <text x="240" y="182" class="sub">→ 30 means μ</text>
+
+  <!-- 3 sample -->
+  <rect x="418" y="96" width="164" height="100" rx="12" class="policy"/>
+  <circle cx="440" cy="124" r="13" fill="#7C4DDB"/><text x="440" y="130" class="num" text-anchor="middle">3</text>
+  <text x="460" y="131" class="name">Sample</text>
+  <text x="434" y="162" class="sub">a ~ N(μ, σ²)</text>
+  <text x="434" y="182" class="sub">30 actions</text>
+
+  <!-- log sigma -->
+  <rect x="418" y="252" width="164" height="60" rx="12" class="policy"/>
+  <text x="434" y="278" class="name" >learned log σ</text>
+  <text x="434" y="299" class="sub">30 values, no input</text>
+
+  <!-- 4 clip and smooth -->
+  <rect x="612" y="96" width="164" height="100" rx="12" class="env"/>
+  <circle cx="634" cy="124" r="13" fill="#D98A00"/><text x="634" y="130" class="num" text-anchor="middle">4</text>
+  <text x="654" y="131" class="name">Clip + EMA</text>
+  <text x="628" y="162" class="sub">clip to [−1, 1]</text>
+  <text x="628" y="182" class="sub">EMA weight 0.35</text>
+
+  <!-- 5 targets -->
+  <rect x="806" y="96" width="164" height="100" rx="12" class="env"/>
+  <circle cx="828" cy="124" r="13" fill="#D98A00"/><text x="828" y="130" class="num" text-anchor="middle">5</text>
+  <text x="848" y="131" class="name">Targets q*</text>
+  <text x="822" y="162" class="sub">2 synergies +</text>
+  <text x="822" y="182" class="sub">28 joint residuals</text>
+
+  <!-- 6 PD drives -->
+  <rect x="1000" y="96" width="164" height="100" rx="12" class="sim"/>
+  <circle cx="1022" cy="124" r="13" fill="#2F6FDB"/><text x="1022" y="130" class="num" text-anchor="middle">6</text>
+  <text x="1042" y="131" class="name">PD drives</text>
+  <text x="1016" y="162" class="sub">targets → torques</text>
+  <text x="1016" y="182" class="sub">PhysX, 120 Hz</text>
+
+  <!-- wires -->
+  <path d="M194,146 L224,146" class="wire"/>
+  <path d="M388,146 L418,146" class="wire"/>
+  <path d="M582,146 L612,146" class="wire"/>
+  <path d="M776,146 L806,146" class="wire"/>
+  <path d="M970,146 L1000,146" class="wire"/>
+  <path d="M500,252 L500,200" class="wire"/>
+</svg>
