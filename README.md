@@ -27,11 +27,11 @@ modified for snowboarding, and is trained with PPO in stages.
 
 <div align="center">
 
-<img src="docs/demo/04_stage4_tighter_front.gif" width="600" alt="Carving, front view">
+<img src="docs/demo/05_g1_front.gif" width="600" alt="Carving, front view">
 
-<img src="docs/demo/04_stage4_tighter_top.gif" width="600" alt="Carving, top view: a thin S line">
+<img src="docs/demo/05_g1_top.gif" width="600" alt="Carving, top view: a thin S line">
 
-<img src="docs/demo/training.gif" width="600" alt="Isaac Sim: 64 riders in parallel, as in training">
+<img src="docs/demo/05_g1_training.gif" width="600" alt="Isaac Sim: 64 riders in parallel, as in training">
 
 </div>
 
