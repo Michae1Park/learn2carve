@@ -1,0 +1,15 @@
+# G1 third edge push on the 70/65 setup (as stage5_g1_7065_edge65, command up to 75°). Warm-start from a
+# stage5_g1_7065_edge65 run: --set robot=g1 --init_from <run>.
+
+env:
+  binding_angles_deg: [70, 65]
+  stance_width: 0.42
+  g1_gains: isaac
+  arm_action_scale: 0.5
+  free_action_scale: {}
+  synergy_edge_rad: {left_knee_joint: 0.5, right_knee_joint: 0.5, left_ankle_pitch_joint: -0.3, right_ankle_pitch_joint: -0.3}
+  g1_arm_gains: [300, 15]
+  edge_cmd_amp_deg: [55, 75]    # stage 5: [45, 65]
+  edge_cmd_level_init: 0.5      # the stage 5 policy tracks 65°: start halfway (65°)
+
+rewards: {}
