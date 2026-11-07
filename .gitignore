@@ -230,3 +230,6 @@ envs/assets/src/
 
 # local reference material (photos and video of real carving): never pushed
 reference-image/
+
+# learn2carve: G1 stage 01-06 weights live on the Hugging Face Hub (scripts/upload_hf.py), not in git
+saved/g1/chain/0[1-6]_*/checkpoints/
