@@ -92,8 +92,10 @@ def isaac_actuators() -> dict:
 
 def rider_cfg(stance: dict | None = None, world_pins: dict | None = None, solver_iterations: tuple[int, int] = (32, 4),
               binding_angles: tuple[float, float] | None = None, stance_width: float | None = None,
-              board_flex: bool = False, gains: str = "unitree", **_amp_only) -> ArticulationCfg:
-    """Same signature as envs.rider.rider_cfg; AMP-only options are ignored. gains: unitree (deployment) or isaac."""
+              board_flex: bool = False, gains: str = "unitree", arm_gains: tuple[float, float] | None = None,
+              **_amp_only) -> ArticulationCfg:
+    """Same signature as envs.rider.rider_cfg; AMP-only options are ignored. gains: unitree (deployment) or isaac.
+    arm_gains: (kp, kd) for the arm group only (the stock arms, kp 3000 / kd 10, are underdamped and wobble)."""
     cfg = physical.load()
     board, rider = dict(cfg["board"]), dict(cfg["rider"])
     if binding_angles:
@@ -133,8 +135,10 @@ def rider_cfg(stance: dict | None = None, world_pins: dict | None = None, solver
         init = ArticulationCfg.InitialStateCfg(
             pos=tuple(stance["pelvis_pos"]), rot=tuple(stance["pelvis_quat"]), joint_pos=joints,
         )
-    return replace(G1_29DOF_CFG, prim_path="{ENV_REGEX_NS}/Robot", spawn=spawn, init_state=init,
-                   actuators=isaac_actuators() if gains == "isaac" else implicit_actuators())
+    actuators = isaac_actuators() if gains == "isaac" else implicit_actuators()
+    if arm_gains:
+        actuators["arms"] = actuators["arms"].replace(stiffness=arm_gains[0], damping=arm_gains[1])
+    return replace(G1_29DOF_CFG, prim_path="{ENV_REGEX_NS}/Robot", spawn=spawn, init_state=init, actuators=actuators)
 
 
 def stance_guess(knee: float, hip_y: float, ankle_y: float, twist: float, angles, open_deg: float) -> dict:

@@ -117,6 +117,7 @@ class CarveEnvCfg(DirectRLEnvCfg):
 
     # rider model, see docs/HUMANOID_MODEL.md
     g1_gains: str = "unitree"  # g1 drives: unitree (deployment gains) or isaac (Isaac Lab's stock, the first 60/50 runs)
+    g1_arm_gains: tuple[float, float] | None = None  # g1: (kp, kd) for the arms only, e.g. (300, 15)
     robot: str = "amp"  # amp (edited AMP humanoid) or g1 (stock Unitree G1, envs/rider_g1.py, envs/physical_g1.yaml)
     physics_hz: int = 120
     solver_iterations: tuple[int, int] = (32, 4)
@@ -208,7 +209,7 @@ def apply_rider_options(cfg: CarveEnvCfg) -> None:
     if cfg.observation_space == 81 + 6:
         cfg.observation_space = base_obs_size(cfg)
     physical.select(cfg.robot)
-    robot_options = {"gains": cfg.g1_gains} if cfg.robot == "g1" else {}
+    robot_options = ({"gains": cfg.g1_gains, "arm_gains": cfg.g1_arm_gains} if cfg.robot == "g1" else {})
     cfg.scene.robot = profile(cfg).rider_cfg(
         **robot_options,
         stance=load_stance(configured_binding_angles(cfg), cfg.stance_tag),

@@ -8,5 +8,6 @@ env:
   arm_action_scale: 0.5
   free_action_scale: {}
   synergy_edge_rad: {left_knee_joint: 0.5, right_knee_joint: 0.5, left_ankle_pitch_joint: -0.3, right_ankle_pitch_joint: -0.3}
+  g1_arm_gains: [300, 15]       # arms only: stock kp 3000 / kd 10 is underdamped and wobbles
 
 rewards: {}
