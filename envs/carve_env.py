@@ -10,6 +10,7 @@ Import after Isaac Sim launched.
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 
 import torch
 import yaml
@@ -26,6 +27,7 @@ from isaaclab_physx.physics import PhysxCfg
 from isaaclab_physx.sim.spawners.materials import PhysxRigidBodyMaterialCfg
 
 from . import physical
+from . import rider as amp_rider
 from .rider import camber_angle, rider_cfg, rider_scale
 from .snow import SnowParams, air_drag, board_wrench, snow_wrench
 
@@ -40,6 +42,19 @@ FLEX_BOARD_OBS = 4
 SYNERGIES = 2
 PASSIVE_GROUPS = {"ankle": 6, "neck": 3, "knee:2": 2}  # DoF-name substring -> DoF count
 IDENTITY_XYZW = (0.0, 0.0, 0.0, 1.0)
+
+
+def profile(cfg) -> SimpleNamespace:
+    """Robot-specific names and counts: the edited AMP humanoid or the stock Unitree G1."""
+    if cfg.robot == "g1":
+        from . import rider_g1 as g1
+
+        return SimpleNamespace(rider_cfg=g1.rider_cfg, stock_joints=g1.STOCK_JOINTS, passive=g1.PASSIVE_GROUPS,
+                               torso=g1.TORSO, key_bodies=g1.KEY_BODIES, rescale=False)
+    if cfg.robot != "amp":
+        raise ValueError(f"robot must be amp or g1, got {cfg.robot}")
+    return SimpleNamespace(rider_cfg=amp_rider.rider_cfg, stock_joints=STOCK_JOINTS, passive=PASSIVE_GROUPS,
+                           torso="torso", key_bodies=KEY_BODIES, rescale=True)
 
 
 def stance_file(binding_angles: tuple[float, float] | None = None, tag: str = ""):
@@ -101,6 +116,9 @@ class CarveEnvCfg(DirectRLEnvCfg):
     start_yaw_deg = 0.0
 
     # rider model, see docs/HUMANOID_MODEL.md
+    g1_gains: str = "unitree"  # g1 drives: unitree (deployment gains) or isaac (Isaac Lab's stock, the first 60/50 runs)
+    g1_arm_gains: tuple[float, float] | None = None  # g1: (kp, kd) for the arms only, e.g. (300, 15)
+    robot: str = "amp"  # amp (edited AMP humanoid) or g1 (stock Unitree G1, envs/rider_g1.py, envs/physical_g1.yaml)
     physics_hz: int = 120
     solver_iterations: tuple[int, int] = (32, 4)
     thoracic: bool = False
@@ -110,6 +128,7 @@ class CarveEnvCfg(DirectRLEnvCfg):
     arm_action_scale: float | None = None  # not reduced by synergy_residual
     arm_stiffness_scale: float = 1.0
     leg_action_scale: float | None = None
+    free_action_scale: dict = {}  # {joint-name substring: scale}, like arm_action_scale: not reduced by synergy_residual
     knee_rotation: bool = False
     passive_joints: tuple[str, ...] = ()  # PASSIVE_GROUPS left to their drives at the stance target
 
@@ -145,7 +164,12 @@ class CarveEnvCfg(DirectRLEnvCfg):
     )
 
     def __post_init__(self):
-        self.scene.robot = rider_cfg(stance=load_stance())
+        # placeholder rider; apply_rider_options rebuilds it once the overrides (robot, stance tag) are in. A saved
+        # run's physical.yaml can name binding angles with no untagged stance (a G1 run's 60/50), so it may be absent
+        try:
+            self.scene.robot = rider_cfg(stance=load_stance())
+        except FileNotFoundError:
+            self.scene.robot = None
 
 
 def configured_binding_angles(cfg: CarveEnvCfg) -> tuple[float, float] | None:
@@ -155,7 +179,7 @@ def configured_binding_angles(cfg: CarveEnvCfg) -> tuple[float, float] | None:
 def num_joints(cfg: CarveEnvCfg) -> int:
     """Every DoF in the articulation, the board's spring included."""
     extra = sum(2 for enabled in (cfg.thoracic, cfg.knee_rotation, cfg.board_flex) if enabled)
-    return STOCK_JOINTS + extra
+    return profile(cfg).stock_joints + extra
 
 
 def is_passive(cfg: CarveEnvCfg, joint: str) -> bool:
@@ -164,7 +188,7 @@ def is_passive(cfg: CarveEnvCfg, joint: str) -> bool:
 
 def num_dof(cfg: CarveEnvCfg) -> int:
     """Policy-driven DoF."""
-    passive = sum(count for group, count in PASSIVE_GROUPS.items()
+    passive = sum(count for group, count in profile(cfg).passive.items()
                   if group in cfg.passive_joints and (group != "knee:2" or cfg.knee_rotation))
     board_spring = 2 if cfg.board_flex else 0
     return num_joints(cfg) - board_spring - passive
@@ -184,7 +208,10 @@ def apply_rider_options(cfg: CarveEnvCfg) -> None:
     cfg.action_space = num_dof(cfg) + (SYNERGIES if cfg.synergy else 0)
     if cfg.observation_space == 81 + 6:
         cfg.observation_space = base_obs_size(cfg)
-    cfg.scene.robot = rider_cfg(
+    physical.select(cfg.robot)
+    robot_options = ({"gains": cfg.g1_gains, "arm_gains": cfg.g1_arm_gains} if cfg.robot == "g1" else {})
+    cfg.scene.robot = profile(cfg).rider_cfg(
+        **robot_options,
         stance=load_stance(configured_binding_angles(cfg), cfg.stance_tag),
         binding_angles=configured_binding_angles(cfg),
         solver_iterations=tuple(cfg.solver_iterations),
@@ -247,6 +274,14 @@ class CarveEnv(DirectRLEnv):
 
         stance = load_stance(configured_binding_angles(self.cfg), self.cfg.stance_tag)
         self.stance_pos = self.robot.data.default_joint_pos.torch.clone()
+        # zero-action targets: the stance's holding targets (scripts/feed_forward.py) where it has them, so soft drives
+        # hold the pose under gravity; otherwise the stance itself
+        self.stance_target = self.stance_pos.clone()
+        names = self.robot.joint_names
+        targets = stance.get("joint_target", {}) if stance.get("joint_target_gains", "unitree") == self.cfg.g1_gains else {}
+        for name, value in targets.items():
+            if name in names:
+                self.stance_target[:, names.index(name)] = value
         self.pelvis_in_board_pos = torch.tensor(stance["pelvis_pos"], device=self.device)
         self.pelvis_in_board_quat = torch.tensor(stance["pelvis_quat"], device=self.device)
         self.board_half_thickness = params["board"]["thickness"] / 2
@@ -261,8 +296,9 @@ class CarveEnv(DirectRLEnv):
         self.board_ids = [self.board_id] + ([bodies.index("board_tail")] if self.cfg.board_flex else [])
         self.contact_ids = [self.contact.body_names.index(bodies[i]) for i in self.board_ids]
         self.pelvis_id = bodies.index("pelvis")
-        self.torso_id = bodies.index("torso")
-        self.key_ids = [bodies.index(name) for name in KEY_BODIES]
+        robot = profile(self.cfg)
+        self.torso_id = bodies.index(robot.torso)
+        self.key_ids = [bodies.index(name) for name in robot.key_bodies]
         self.actuated = torch.tensor([i for i, j in enumerate(joints) if not is_passive(self.cfg, j)],
                                      device=self.device)
         assert len(self.actuated) == num_dof(self.cfg), (len(self.actuated), num_dof(self.cfg))
@@ -278,6 +314,11 @@ class CarveEnv(DirectRLEnv):
         self.arm_joint = torch.tensor(["shoulder" in j or "elbow" in j for j in joints], device=self.device)
         if self.cfg.arm_action_scale is not None:
             scale[self.arm_joint] = self.cfg.arm_action_scale
+        self.free_joint = self.arm_joint & (self.cfg.arm_action_scale is not None)
+        for part, value in self.cfg.free_action_scale.items():
+            mask = torch.tensor([part in j for j in joints], device=self.device)
+            scale[mask] = value
+            self.free_joint |= mask
         self.action_scale = (scale * 0.5 * (self.joint_upper - self.joint_lower))[self.actuated]
         self.actions = torch.zeros(self.num_envs, num_dof(self.cfg), device=self.device)
         self.synergy = torch.zeros(self.num_envs, SYNERGIES, device=self.device)
@@ -295,7 +336,10 @@ class CarveEnv(DirectRLEnv):
         self.heel_rad = joint_vector(self.cfg.synergy_heel_rad)
 
     def _scale_to_rider_mass(self, rider_mass: float) -> None:
-        """The AMP humanoid is ~36 kg: scale masses, inertias and joint gains to the rider's mass."""
+        """The AMP humanoid is ~36 kg: scale masses, inertias and joint gains to the rider's mass. A stock robot keeps its own."""
+        if not profile(self.cfg).rescale:
+            self.mass_scale = 1.0
+            return
         mass = self.robot.data.body_mass.torch.clone()
         human = [i for i in range(mass.shape[1]) if i not in self.board_ids]
         k = rider_mass / mass[0, human].sum().item()
@@ -360,12 +404,9 @@ class CarveEnv(DirectRLEnv):
         self.actions = smooth(self.actions, actions, self.cfg.joint_smooth)
 
     def _apply_action(self):
-        target = self.stance_pos.clone()
+        target = self.stance_target.clone()
         if self.cfg.synergy:
-            if self.cfg.arm_action_scale is not None:
-                residual = torch.where(self.arm_joint[self.actuated], 1.0, self.cfg.synergy_residual)
-            else:
-                residual = self.cfg.synergy_residual
+            residual = torch.where(self.free_joint[self.actuated], 1.0, self.cfg.synergy_residual)
             target[:, self.actuated] += residual * self.action_scale * self.actions
             edge = self.synergy[:, :1]
             target += self.synergy @ self.synergy_rad

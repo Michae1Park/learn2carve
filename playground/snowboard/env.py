@@ -59,6 +59,8 @@ class RewardsCfg:
     pose_ref_com: float = MISSING
     pose_ref_sigma_deg: float = MISSING
     rise: float = MISSING
+    rise_start_m: float = MISSING
+    rise_width_m: float = MISSING
     tilt: float = MISSING
     tilt_free_deg: float = MISSING
     grab: float = MISSING
@@ -360,7 +362,7 @@ class SnowboardEnv(CarveEnv):
         terms = {
             "edge_cmd": gauss(error, deg(w.edge_cmd_sigma_deg)) * edged,
             "edge_side": torch.where(side_on, torch.sign(edge) * torch.sign(command), torch.zeros_like(edge)),
-            "rise": near_flat * ramp(self.pelvis_height(), 0.35, 0.2),
+            "rise": near_flat * ramp(self.pelvis_height(), w.rise_start_m, w.rise_width_m),
             "tilt": ramp(self.torso_incline(), deg(w.tilt_free_deg), deg(20.0)),
         }
         if w.pose_ref:

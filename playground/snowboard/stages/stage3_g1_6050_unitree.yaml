@@ -1,0 +1,13 @@
+# Stage 3 fine-tune of the G1 60/50 policy onto Unitree's deployment gains (the real robot's controller). Warm-start
+# from a stage3_g1_6050 run: --set robot=g1 --init_from <run>. Holding targets (stance_60_50_g1.yaml joint_target,
+# scripts/feed_forward.py) keep the soft waist and legs at the stance at zero action. Action ranges and the synergy are
+# kept as the policy learned them, so only the drives change.
+
+env:
+  binding_angles_deg: [60, 50]
+  g1_gains: unitree
+  arm_action_scale: 0.5
+  free_action_scale: {waist_roll: 1.0, waist_pitch: 1.0, waist_yaw: 0.25}   # waist torque: at kp 200 the full range reaches the 50 N·m motors
+  synergy_edge_rad: {left_knee_joint: 0.5, right_knee_joint: 0.5, left_ankle_pitch_joint: -0.3, right_ankle_pitch_joint: -0.3}
+
+rewards: {}

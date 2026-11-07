@@ -1,0 +1,37 @@
+# learn2carve — physical facts for the stock Unitree G1 rider (CarveEnvCfg robot=g1). Same keys as physical.yaml.
+# The robot is not changed; the board, stance and bindings are chosen to make riding as easy as possible for it.
+# ALL VALUES IN SI UNITS (m, kg, s, deg).
+
+rider:                    # Unitree G1 29-DoF + Dex3 hands, stock (Isaac Lab G1_29DOF_CFG)
+  height: 1.32            # robot height, not used to scale it
+  mass: 34.0              # kg, the USD's own masses (not rescaled)
+  stance: regular         # left foot forward (toward the nose)
+  stance_width: 0.35      # binding centre to centre: ~ the G1 shank (knee to sole 0.354 m)
+  binding_angles_deg: [30.0, 15.0]   # edging goes mostly through ankle pitch (−50…30°), not the ±15° ankle roll
+
+board:                    # the adult board scaled to 142 cm (k = 1.42 / 1.52 = 0.934): length, widths and sidecut × k
+  length: 1.42            # 142 cm
+  effective_edge: 1.065   # m, 1.14 × k
+  waist_width: 0.230      # m, 0.246 × k: narrower rolls onto edge quicker; still clears the G1's 0.15 m feet
+  nose_width: 0.270       # m, 0.289 × k
+  tail_width: 0.270
+  sidecut_radius: [10.0, 6.35, 10.0]   # m, the adult [10.7, 6.8, 10.7] × k
+  sidecut_radius_eff: 7.1 # m, 7.6 × k. depth d = (0.270 - 0.230) / 2 = 0.020 m, R ≈ 1.065² / (8 d) = 7.1 m
+  setback: -0.015         # -15 mm toward the tail, as physical.yaml
+  thickness: 0.008
+  mass: 1.5               # kg, light
+
+piste:
+  fence_half_width: 20.0
+
+snow:                     # as physical.yaml, drag area scaled to the smaller body
+  mu_glide: 0.05
+  mu_flat: 0.15
+  mu_edge: 1.5
+  edge_lock_deg: 15.0
+  min_edge_deg: 3.0
+  k_yaw: 50.0
+  cd_area: 0.3            # m², smaller frontal area than the 1.65 m rider (0.5)
+  air_density: 1.0
+  grip_stiffness: 20000.0
+  grip_damping: 800.0

@@ -343,6 +343,25 @@ def dress(stage, root: str) -> None:
 
 # -- board --------------------------------------------------------------------------------------------------------
 
+ROBOT_FINISH = (0.045, 0.045, 0.05)  # near-black, satin
+
+
+def darken(stage, root: str) -> None:
+    """One dark material over every link's visuals (instanced meshes take it from their instance root)."""
+    from pxr import Sdf, Usd, UsdShade
+
+    material = UsdShade.Material.Define(stage, f"{root}/Looks/robot_finish")
+    shader = UsdShade.Shader.Define(stage, f"{root}/Looks/robot_finish/shader")
+    shader.CreateIdAttr("UsdPreviewSurface")
+    shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(ROBOT_FINISH)
+    shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.45)
+    shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(0.2)
+    material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+    for part in Usd.PrimRange(stage.GetPrimAtPath(root)):  # instance proxies are skipped; their roots are bound
+        if part.GetName() == "visuals":
+            UsdShade.MaterialBindingAPI.Apply(part).Bind(material, UsdShade.Tokens.strongerThanDescendants)
+
+
 def add_board_graphics(stage, body_at, length: float, width: float, thickness: float) -> None:
     """Stadium-shaped deck with stripes, tip rings and chevrons; no mass, no collision. body_at(x) → body path."""
     from pxr import Gf, UsdGeom
@@ -463,7 +482,7 @@ def add_board(stage, root: str, cfg: RiderSpawnCfg) -> None:
     for i, (foot, (pos, rot)) in enumerate(cfg.bindings.items()):
         is_front = i == 0
         add_fixed_joint(stage, f"{root}/joints/{foot}_binding", f"{root}/{foot}", body_at(pos[0]),
-                        foot_sole(cfg.scale_factor), IDENTITY_WXYZ, pos, rot, in_tree=is_front)
+                        cfg.foot_sole or foot_sole(cfg.scale_factor), IDENTITY_WXYZ, pos, rot, in_tree=is_front)
 
     for body, (pos, rot) in cfg.world_pins.items():
         add_fixed_joint(stage, f"{root}/joints/{body}_pin", None, f"{root}/{body}", pos, rot, (0.0, 0.0, 0.0),
@@ -474,6 +493,10 @@ def add_board(stage, root: str, cfg: RiderSpawnCfg) -> None:
 def spawn_rider(prim_path: str, cfg: RiderSpawnCfg, translation=None, orientation=None, **kwargs):
     prim = spawn_from_usd_file(prim_path, cfg.usd_path, cfg, translation, orientation)
     stage = prim.GetStage()
+    if cfg.robot != "amp":  # a stock robot: only the board is added, and a darker finish
+        add_board(stage, prim_path, cfg)
+        darken(stage, prim_path)
+        return prim
     if abs(cfg.scale_factor - 1.0) > 1e-6:
         assert not cfg.thoracic, "the thoracic split uses stock torso dimensions"
         scale_humanoid(stage, prim_path, cfg.scale_factor)
@@ -497,6 +520,8 @@ def spawn_rider(prim_path: str, cfg: RiderSpawnCfg, translation=None, orientatio
 @configclass
 class RiderSpawnCfg(UsdFileCfg):
     func: Callable | str = spawn_rider
+    robot: str = "amp"  # amp: edited AMP humanoid; g1: stock Unitree G1 (envs/rider_g1.py)
+    foot_sole: tuple[float, float, float] | None = None  # in the foot body frame; None: the AMP foot, scaled
     scale_factor: float = 1.0  # humanoid only; the board keeps its size
     board_size: tuple[float, float, float] = (1.52, 0.246, 0.008)
     board_mass: float = 2.7

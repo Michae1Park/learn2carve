@@ -28,6 +28,16 @@ def use(run_dir: pathlib.Path):
         _active["stances"] = run_dir
 
 
+def select(robot: str) -> None:
+    """Non-AMP robots read envs/physical_<robot>.yaml, unless a saved run's own copy is already in use."""
+    if robot != "amp" and _active["physical"] == PHYSICAL_YAML:
+        _active["physical"] = HERE / f"physical_{robot}.yaml"
+
+
+def active_path() -> pathlib.Path:
+    return _active["physical"]
+
+
 def load() -> dict:
     return _read(_active["physical"])
 

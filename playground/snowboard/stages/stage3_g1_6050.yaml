@@ -1,0 +1,12 @@
+# Stage 3 for the G1 on its first setup: 60/50 bindings and Isaac Lab's stock drives, which the stage 3 baseline
+# (warm-started from the 60/50 stage 2) trained on, with the current board of envs/physical_g1.yaml. Use with
+# --set robot=g1 --init_from <that run>. Otherwise as stage 3 (env.yaml).
+
+env:
+  binding_angles_deg: [60, 50]  # stance_60_50_g1.yaml
+  g1_gains: isaac
+  arm_action_scale: 0.5
+  free_action_scale: {}
+  synergy_edge_rad: {left_knee_joint: 0.5, right_knee_joint: 0.5, left_ankle_pitch_joint: -0.3, right_ankle_pitch_joint: -0.3}
+
+rewards: {}
