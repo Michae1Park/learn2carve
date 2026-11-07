@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">Learn2Carve</h1>
   <p align="center">
-    <strong>A simulated snowboarder that learns aggressive carving turns with reinforcement learning</strong>
+    <strong>A Unitree G1 humanoid robot that learns aggressive snowboard carving with reinforcement learning</strong>
   </p>
   <p align="center">
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12+-blue.svg" alt="Python 3.12+"></a>
@@ -21,9 +21,9 @@
 
 ## Overview
 
-Learn2Carve teaches a humanoid to ride a snowboard down a slope and lay it over on its edge, drawing a thin S line.
-The snow, the board and their interaction are modelled from scratch. The rider is Isaac Lab's AMP humanoid, lightly
-modified for snowboarding, and is trained with PPO in stages.
+Learn2Carve teaches a humanoid robot to ride a snowboard down a slope and lay it over on its edge, drawing a thin S
+line. The snow, the board and their interaction are modelled from scratch. The rider is a stock Unitree G1 with no
+physical modifications: its real masses, joint limits and motor torque limits. It is trained with PPO in stages.
 
 <div align="center">
 
@@ -38,9 +38,9 @@ modified for snowboarding, and is trained with PPO in stages.
 ## What it does
 
 - **Models** the snow, the board and their interaction (glide, sidecut steering, edge grip).
-- **Rider:** a modified AMP humanoid, strapped to the board through bindings.
+- **Robot:** a stock Unitree G1 (29 DoF) within its real joint and torque limits, strapped to the board through bindings.
 - **Reward:** designed to favor a high edge angle, a thin track and turns that finish across the hill.
-- **Training:** PPO in stages in Isaac Sim, up to full S turns at ~40° edge angles (mean toe 43°, heel 38°, up to 57°).
+- **Training:** PPO in stages in Isaac Sim, up to full S turns at ~57° edge angles, 6 linked turns per 100 m run.
 
 ## Models
 
@@ -76,14 +76,14 @@ scripts/install.sh   # Isaac Sim 6.1 + Isaac Lab + skrl, into .venv-sim
 **Run locally**
 
 ```bash
-# Watch a trained rider carve
-scripts/py playground/snowboard/play.py saved/04_stage4_tighter
+# Watch the trained G1 carve
+scripts/py playground/snowboard/play.py saved/g1/chain/07_stage7_g1_7065_finish60
 
 # ...with the live stream (Isaac Sim viewport)
-scripts/py playground/snowboard/play.py saved/04_stage4_tighter --livestream 2 --follow
+scripts/py playground/snowboard/play.py saved/g1/chain/07_stage7_g1_7065_finish60 --livestream 2 --follow
 
-# Train: stage 2 from scratch, then stage 3 and stage 4, each warm-started from the last
-scripts/py playground/snowboard/train.py --stage stage2
-scripts/py playground/snowboard/train.py --stage stage3 --init_from logs/playground/snowboard/<stage 2 run>
-scripts/py playground/snowboard/train.py --stage stage4 --init_from logs/playground/snowboard/<stage 3 run>
+# Train: stage 2 from scratch, then stages 3-7, each warm-started from the last
+scripts/py playground/snowboard/train.py --stage stage2_g1_7065 --set robot=g1
+scripts/py playground/snowboard/train.py --stage stage3_g1_7065 --set robot=g1 --init_from logs/playground/snowboard/<stage 2 run>
+scripts/py playground/snowboard/train.py --stage stage4_g1_7065_edge --set robot=g1 --init_from logs/playground/snowboard/<stage 3 run>
 ```
