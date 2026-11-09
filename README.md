@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">Learn2Carve</h1>
   <p align="center">
-    <strong>A Unitree G1 humanoid robot that learns aggressive snowboard carving with reinforcement learning</strong>
+    <strong>A humanoid robot that learns aggressive snowboard carving with reinforcement learning</strong>
   </p>
   <p align="center">
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12+-blue.svg" alt="Python 3.12+"></a>
