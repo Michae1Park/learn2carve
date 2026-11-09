@@ -124,7 +124,7 @@ Stance width and binding angles come from `envs/physical.yaml`.
 | **`arm_stiffness_scale=0.3`**, **`arm_action_scale=0.5`** | Softer arms (shoulder/elbow gains ×0.3) with a larger action range, so they can reach for the edge |
 | **`synergy=true`**, `synergy_toe_rad`, `synergy_smooth=0.35`, `joint_smooth=0.35` | Edge and lean actions (§5) |
 
-**Also available, off in the demo:** `thoracic` (second spine joint, 30 DoF), `compliant_drives` (per-group stiffness), `neck_stiffness_scale`, `spine_damping_scale`, `physics_hz=240` with `solver_iterations=[16,4]`, `leg_action_scale`, and `board_flex` (two-half board, see [board model §4](BOARD_MODEL.md#4-two-half-board-opt-in-not-used-in-the-demo)).
+**Also available, off in the demo:** `thoracic` (second spine joint, +2 DoF), `compliant_drives` (per-group stiffness), `neck_stiffness_scale`, `spine_damping_scale`, `physics_hz=240` with `solver_iterations=[16,4]`, `leg_action_scale`, and `board_flex` (two-half board, see [board model §4](BOARD_MODEL.md#4-two-half-board-opt-in-not-used-in-the-demo)).
 
 ### Checks (`scripts/rider_check.py`: stance held 3 s, zero action)
 

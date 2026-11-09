@@ -99,10 +99,10 @@ The 140 numbers the network reads, the 30 numbers it outputs, and the processing
 |---|---|---|---|---|---|
 | **Observation** (140) | Humanoid | Joint positions | 30 | $`q \in \mathbb{R}^{30}`$ | All joints (28 driven + 2 passive) |
 |  |  | Joint velocities | 30 | $`\dot q \in \mathbb{R}^{30}`$ | Same joints |
-|  |  | Torso height | 1 | $`h`$ | Root height above the snow |
-|  |  | Torso orientation | 6 | $`(\mathbf{t},\ \mathbf{n})`$ | Root frame as tangent and normal vectors, 3 + 3 |
+|  |  | Torso height | 1 | $`h`$ | Torso height above the snow |
+|  |  | Torso orientation | 6 | $`(\mathbf{t},\ \mathbf{n})`$ | Torso frame as tangent and normal vectors, 3 + 3 |
 |  |  | Torso velocity | 3 + 3 | $`\mathbf{v},\ \boldsymbol{\omega}`$ | Linear and angular velocity |
-|  |  | Hands and feet | 12 | $`\mathbf{p}_k - \mathbf{p}_{\mathrm{root}}`$ | Positions of the right hand, left hand, right foot and left foot relative to the root, in the slope frame (x, y, z each) |
+|  |  | Hands and feet | 12 | $`\mathbf{p}_k - \mathbf{p}_{\mathrm{torso}}`$ | Positions of the right hand, left hand, right foot and left foot relative to the torso, in the slope frame (x, y, z each) |
 |  | Board | Edge angle | 1 | $`\theta`$ | Roll relative to the snow |
 |  |  | Velocity | 2 | $`v_\parallel,\ v_\perp`$ | Along and across the board |
 |  |  | Yaw rate | 1 | $`\dot\psi_b`$ | Board rotation about the snow normal |
@@ -170,7 +170,7 @@ resets that rider on its own (2048 riders reset independently).
 | **Time-out** (truncated) | Episode length | $`t > T_{\mathrm{ep}}`$ | 10 s (stage 2), 20 s (stages 3–4) | No penalty |
 
 How each ending enters the return (the −50 on a fall or fence, the bootstrap through a time-out) is in
-[§4](#the-training-loop-in-plain-words).
+[§4](#the-training-loop).
 
 ### Rates: policy and physics
 
@@ -213,7 +213,7 @@ r = \Delta t\Big[\,30\,g_e + 20\,g_s + 10\,g_p + 30\,g_r - 10\,g_t + 10\,g_h\Big
 - **It pays for tracking the command** (edge command and edge side: 50 of the 100 points of positive weight) **and for
   the posture that makes a switch possible** (rise, pose reference and hand grab: 50 points).
 - **There is no bonus for staying alive.** A rider earns only by being on an edge near the command, so surviving flat
-  and upright pays nothing, and the −50 fall penalty makes the rider avoid the falls that would end its earning.
+  and upright pays nothing outside the edge change (where only the rise term pays), and the −50 fall penalty makes the rider avoid the falls that would end its earning.
 - **There is no reward for speed.** The speed comes from the slope.
 
 ### The terms in detail
@@ -290,24 +290,12 @@ for higher edges.
 
 ## 4. PPO
 
-### The training loop in plain words
+### The training loop
 
 Here $`\theta`$ denotes the **policy parameters** (the usual RL name), not the edge angle of §1–3; [§6](#6-putting-it-all-together) renames them $`\vartheta`$.
 
 PPO maximizes the discounted sum of the reward $`r_t`$ of §3: $`J(\pi) = \mathbb{E}\left[\sum_t \gamma^t r_t\right]`$.
-It uses the same machinery as supervised learning (forward pass, loss, backprop, gradient step), with one difference:
-**there is no dataset**. The policy collects its own data by acting, and the loss is weighted by how well each action
-turned out.
-
-| | Supervised (SFT) | PPO |
-|---|---|---|
-| Data | Fixed, labeled | Collected by the current policy, used once, then discarded |
-| "Label" | The correct output $`y`$ | The action $`a`$ the policy itself took |
-| Weight | 1 for every example | The advantage $`\hat A`$: positive if the action beat expectations, negative if not |
-| Loss | $`-\mathbb{E}\big[\log p_\theta(y \mid x)\big]`$ | $`\approx -\mathbb{E}\big[\hat A\,\log\pi_\theta(a \mid s)\big]`$ (same gradient at $`\theta = \theta_{\mathrm{old}}`$; the real loss uses a clipped ratio, see The loss) |
-
-So PPO is a weighted cross-entropy: it raises the probability of actions that worked and lowers the rest. Each
-**iteration** has four steps.
+Each **iteration** has four steps.
 
 **1. Collect (forward pass only, no learning).** With the current weights $`\theta_{\mathrm{old}}`$, all 2048 riders act for
 48 steps. Every step is one batched forward pass (input $`2048 \times 140`$) at 30 Hz, and every rider stores a transition:
@@ -691,7 +679,7 @@ Only $`\vartheta`$ and $`w`$ are learned. $`\rho_t`$ (with a time index) is the 
 | $`d_t`$, $`u_t`$ | Episode ended by a fall or fence; episode ended by the time limit |
 | $`t_{\mathrm{ep}}, T_{\mathrm{ep}}`$ | Time since the episode started; its limit (10 s stage 2, 20 s stages 3–4) |
 | $`\log\pi^{\mathrm{old}}_t`$, $`v_t`$ | Log-probability of $`a_t`$ and value estimate, both stored at collection time |
-| $`s'_{t+1}`$ | The observation after step $`t`$, taken before any reset; on a time-out skrl folds $`\gamma V_w(s'_{t+1})`$ into $`r_t`$ at collection time, otherwise it equals the next stored $`s_{t+1}`$ |
+| $`s'_{t+1}`$ | The observation after step $`t`$, taken before any reset; on a time-out skrl folds $`\gamma V_w(s'_{t+1})`$ into $`r_t`$ at collection time, otherwise it equals the next stored $`s_{t+1}`$. (9) writes this bootstrap explicitly, with $`r_t`$ the raw reward; the two are equivalent |
 | $`\delta_t, \hat A_t, \hat R_t`$ | TD error, advantage (how much better $`a_t`$ did than expected), value target |
 | $`\rho_t`$ | Probability ratio, new policy over old, for the stored action |
 | $`\mathcal L_{\mathrm{clip}}, \mathcal L_V, \mathcal H(\pi), \mathcal L`$ | Clipped policy objective, value loss, policy entropy, total loss |
